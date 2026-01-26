@@ -53,10 +53,10 @@
     "url": "https://github.com/YosefHayim/ebay-mcp/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.25.2",
-    "axios": "^1.7.9",
+    "@modelcontextprotocol/sdk": "1.25.3",
+    "axios": "^1.13.3",
     "chalk": "^5.6.2",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
@@ -64,7 +64,7 @@
     "jsonwebtoken": "^9.0.2",
     "prompts": "^2.4.2",
     "winston": "^3.19.0",
-    "zod": "^4.3.5",
+    "zod": "^4.3.6",
     "zod-to-json-schema": "^3.24.1"
   },
   "devDependencies": {
