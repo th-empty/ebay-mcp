@@ -90,8 +90,22 @@ export class TradingApiClient {
       throw new Error(`Trading API ${callName} request failed: ${message}`);
     }
 
-    const parsed = this.parser.parse(response.data);
-    const result = parsed[responseTag] || parsed;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = this.parser.parse(response.data) as Record<string, unknown>;
+    } catch (e) {
+      throw new Error(
+        `Failed to parse Trading API ${callName} response: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+    const result = (parsed[responseTag] || parsed) as Record<string, unknown>;
+
+    // Log warnings without failing
+    if (result.Ack === 'Warning') {
+      apiLogger.warn(`Trading API ${callName} returned warnings`, {
+        errors: result.Errors,
+      });
+    }
 
     // Check for eBay errors
     if (result.Ack === 'Failure' || result.Ack === 'PartialFailure') {
