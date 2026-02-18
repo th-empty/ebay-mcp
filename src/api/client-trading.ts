@@ -86,7 +86,7 @@ export class TradingApiClient {
     const result = parsed[responseTag] || parsed;
 
     // Check for eBay errors
-    if (result.Ack === 'Failure') {
+    if (result.Ack === 'Failure' || result.Ack === 'PartialFailure') {
       const errors = result.Errors;
       const firstError = Array.isArray(errors) ? errors[0] : errors;
       const message =

@@ -51,8 +51,8 @@ export class TradingApi {
         | undefined;
       const priceValue =
         typeof currentPrice === 'object' && currentPrice !== null
-          ? (currentPrice['#text'] as number)
-          : (currentPrice as number) || 0;
+          ? Number(currentPrice['#text'] || 0)
+          : Number(currentPrice || 0);
 
       return {
         itemId: String(item.ItemID || ''),
@@ -98,7 +98,7 @@ export class TradingApi {
     if (!itemId) throw new Error('itemId is required');
 
     return await this.client.execute('ReviseFixedPriceItem', {
-      Item: { ItemID: itemId, ...fields },
+      Item: { ...fields, ItemID: itemId },
     });
   }
 
@@ -121,7 +121,7 @@ export class TradingApi {
     if (!itemId) throw new Error('itemId is required');
 
     return await this.client.execute('RelistFixedPriceItem', {
-      Item: { ItemID: itemId, ...modifications },
+      Item: { ...modifications, ItemID: itemId },
     });
   }
 }
