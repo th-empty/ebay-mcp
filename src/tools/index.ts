@@ -11,6 +11,7 @@ import {
   metadataTools,
   otherApiTools,
   taxonomyTools,
+  tradingTools,
   tokenManagementTools,
   type ToolDefinition,
 } from '@/tools/definitions/index.js';
@@ -82,6 +83,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     ...communicationTools,
     ...otherApiTools,
     ...developerTools,
+    ...tradingTools,
   ];
 }
 
@@ -1900,6 +1902,32 @@ export async function executeTool(
       );
     case 'ebay_get_signing_key':
       return await api.developer.getSigningKey(args.signingKeyId as string);
+
+    // Trading API - Listing Management
+    case 'ebay_get_active_listings':
+      return await api.trading.getActiveListings(
+        args.page as number | undefined,
+        args.entriesPerPage as number | undefined
+      );
+    case 'ebay_get_listing':
+      return await api.trading.getListing(args.itemId as string);
+    case 'ebay_create_listing':
+      return await api.trading.createListing(args.item as Record<string, unknown>);
+    case 'ebay_revise_listing':
+      return await api.trading.reviseListing(
+        args.itemId as string,
+        args.fields as Record<string, unknown>
+      );
+    case 'ebay_end_listing':
+      return await api.trading.endListing(
+        args.itemId as string,
+        args.reason as string | undefined
+      );
+    case 'ebay_relist_item':
+      return await api.trading.relistItem(
+        args.itemId as string,
+        args.modifications as Record<string, unknown> | undefined
+      );
 
     default:
       throw new Error(`Unknown tool: ${toolName}`);
