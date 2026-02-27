@@ -2,8 +2,8 @@ name: eBay API Status Sync
 
 on:
   schedule:
-    # Daily at 8:00 AM UTC
-    - cron: '0 8 * * *'
+    # Weekly on Monday at 8:00 AM UTC
+    - cron: '0 8 * * 1'
   workflow_dispatch:
 
 jobs:
