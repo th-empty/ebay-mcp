@@ -8,10 +8,9 @@ import axios from 'axios';
 import chalk from 'chalk';
 import { checkForUpdates } from '../utils/version.js';
 import { config } from 'dotenv';
-import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import { getOAuthAuthorizationUrl } from '../config/environment.js';
-import prompts from 'prompts';
+import { defineWizard, runWizard, ClackRenderer } from 'grimoire-wizard';
 
 config({ quiet: true });
 
@@ -21,19 +20,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '../..');
 
-const TOTAL_STEPS = 6;
-
-type StepResult = 'continue' | 'back' | 'cancel';
-
-interface SetupState {
-  currentStep: number;
-  config: Record<string, string>;
-  detectedClients: LLMClient[];
-  environment: 'sandbox' | 'production';
-  hasExistingConfig: boolean;
-  isQuickMode: boolean;
-}
-
 interface LLMClient {
   name: string;
   displayName: string;
@@ -41,23 +27,6 @@ interface LLMClient {
   detected: boolean;
   configExists: boolean;
 }
-
-const ebay = {
-  red: chalk.hex('#E53238'),
-  blue: chalk.hex('#0064D2'),
-  yellow: chalk.hex('#F5AF02'),
-  green: chalk.hex('#86B817'),
-};
-
-const ui = {
-  dim: chalk.dim,
-  bold: chalk.bold,
-  success: chalk.green,
-  warning: chalk.yellow,
-  error: chalk.red,
-  info: chalk.cyan,
-  hint: chalk.gray,
-};
 
 const MARKETPLACE_OPTIONS: { value: string; label: string }[] = [
   { value: 'EBAY_US', label: 'EBAY_US — United States' },
@@ -81,149 +50,40 @@ const CONTENT_LANGUAGE_OPTIONS: { value: string; label: string }[] = [
   { value: 'nl-BE', label: 'nl-BE — Dutch (Belgium)' },
 ];
 
-const LOGO = `
-   ${ebay.red('███████╗')}${ebay.blue('██████╗ ')}${ebay.yellow('█████╗ ')}${ebay.green('██╗   ██╗')}
-   ${ebay.red('██╔════╝')}${ebay.blue('██╔══██╗')}${ebay.yellow('██╔══██╗')}${ebay.green('╚██╗ ██╔╝')}
-   ${ebay.red('█████╗  ')}${ebay.blue('██████╔╝')}${ebay.yellow('███████║')}${ebay.green(' ╚████╔╝ ')}
-   ${ebay.red('██╔══╝  ')}${ebay.blue('██╔══██╗')}${ebay.yellow('██╔══██║')}${ebay.green('  ╚██╔╝  ')}
-   ${ebay.red('███████╗')}${ebay.blue('██████╔╝')}${ebay.yellow('██║  ██║')}${ebay.green('   ██║   ')}
-   ${ebay.red('╚══════╝')}${ebay.blue('╚═════╝ ')}${ebay.yellow('╚═╝  ╚═╝')}${ebay.green('   ╚═╝   ')}
-`;
+const ui = {
+  dim: chalk.dim,
+  bold: chalk.bold,
+  success: chalk.green,
+  warning: chalk.yellow,
+  error: chalk.red,
+  info: chalk.cyan,
+};
 
-/**
- * Clear the terminal screen.
- */
-function clearScreen(): void {
-  console.clear();
-}
+// ─── Business-logic helpers (preserved from original) ─────────────────────────
 
-/**
- * Render the eBay ASCII logo and heading.
- */
-function showLogo(): void {
-  console.log(LOGO);
-  console.log(ui.bold.white('            MCP Server Setup Wizard by Yosef Hayim Sabag\n'));
-}
-
-/**
- * Render a step progress bar with title.
- */
-function showProgress(step: number, title: string): void {
-  const filled = '●'.repeat(step);
-  const empty = '○'.repeat(TOTAL_STEPS - step);
-  const progress = `${ui.info(filled)}${ui.dim(empty)}`;
-
-  console.log(ui.dim('─'.repeat(60)));
-  console.log(`  ${progress}  ${ui.bold(`Step ${step}/${TOTAL_STEPS}`)}: ${title}`);
-  console.log(ui.dim('─'.repeat(60)) + '\n');
-}
-
-/**
- * Render keyboard hints for the current step.
- */
-function showKeyboardHints(hints: string[]): void {
-  const hintText = hints.map((h) => ui.dim(h)).join('  │  ');
-  console.log(`\n  ${hintText}\n`);
-}
-
-/**
- * Render a tip callout.
- */
-function showTip(message: string): void {
-  console.log(`  ${ebay.yellow('💡 Tip:')} ${ui.dim(message)}\n`);
-}
-
-/**
- * Render a success line.
- */
-function showSuccess(message: string): void {
-  console.log(`  ${ui.success('✓')} ${message}`);
-}
-
-/**
- * Render an error line.
- */
-function showError(message: string): void {
-  console.log(`  ${ui.error('✗')} ${message}`);
-}
-
-/**
- * Open a URL in the default browser (cross-platform).
- */
-function openBrowser(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const os = platform();
-    let command: string;
-
-    switch (os) {
-      case 'darwin':
-        command = `open "${url}"`;
-        break;
-      case 'win32':
-        command = `start "" "${url}"`;
-        break;
-      default:
-        command = `xdg-open "${url}"`;
-    }
-
-    exec(command, (error) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve();
-      }
-    });
-  });
-}
-
-/**
- * Render a warning line.
- */
-function showWarning(message: string): void {
-  console.log(`  ${ui.warning('⚠')} ${message}`);
-}
-
-/**
- * Parse authorization code from callback URL or raw code
- * Handles both full URLs and just the code parameter
- */
 function parseAuthorizationCode(input: string): string | null {
   const trimmed = input.trim();
-
-  // If it looks like a URL, parse the code parameter
   if (trimmed.includes('code=') || trimmed.includes('?') || trimmed.includes('&')) {
     try {
-      // Handle both full URLs and query strings
       let searchParams: URLSearchParams;
-
       if (trimmed.startsWith('http')) {
-        const url = new URL(trimmed);
-        searchParams = url.searchParams;
+        searchParams = new URL(trimmed).searchParams;
       } else {
-        // It might just be query params like "code=xxx&expires_in=299"
         searchParams = new URLSearchParams(trimmed.startsWith('?') ? trimmed.slice(1) : trimmed);
       }
-
       const code = searchParams.get('code');
-      if (code) {
-        // URL decode the code (it's often URL-encoded)
-        return decodeURIComponent(code);
-      }
+      if (code) return decodeURIComponent(code);
     } catch {
-      // Fall through to try as raw code
+      // fall through
     }
   }
-
-  // Check if it looks like a raw authorization code (starts with v^1.1#)
   if (trimmed.startsWith('v^1.1#') || trimmed.startsWith('v%5E1.1')) {
-    // Decode if URL-encoded
     try {
       return decodeURIComponent(trimmed);
     } catch {
       return trimmed;
     }
   }
-
   return null;
 }
 
@@ -239,50 +99,25 @@ interface EbayUserInfo {
   username: string;
   accountType?: string;
   registrationMarketplaceId?: string;
-  individualAccount?: {
-    firstName?: string;
-    lastName?: string;
-    email?: string;
-  };
-  businessAccount?: {
-    name?: string;
-    email?: string;
-  };
+  individualAccount?: { firstName?: string; lastName?: string; email?: string };
+  businessAccount?: { name?: string; email?: string };
 }
 
-/**
- * Exchange authorization code for tokens using eBay API
- * This mirrors the logic in auth/oauth.ts EbayOAuthClient.exchangeCodeForToken()
- */
 async function exchangeAuthorizationCode(
   code: string,
   clientId: string,
   clientSecret: string,
   redirectUri: string,
-  environment: 'sandbox' | 'production'
+  environment: 'sandbox' | 'production',
 ): Promise<TokenExchangeResult> {
-  const tokenUrl =
-    environment === 'production'
-      ? 'https://api.ebay.com/identity/v1/oauth2/token'
-      : 'https://api.sandbox.ebay.com/identity/v1/oauth2/token';
-
+  const baseUrl =
+    environment === 'production' ? 'https://api.ebay.com' : 'https://api.sandbox.ebay.com';
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
   const response = await axios.post(
-    tokenUrl,
-    new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: redirectUri,
-    }).toString(),
-    {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${credentials}`,
-      },
-    }
+    `${baseUrl}/identity/v1/oauth2/token`,
+    new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }).toString(),
+    { headers: { Authorization: `Basic ${credentials}`, 'Content-Type': 'application/x-www-form-urlencoded' } },
   );
-
   return {
     accessToken: response.data.access_token,
     refreshToken: response.data.refresh_token,
@@ -291,210 +126,69 @@ async function exchangeAuthorizationCode(
   };
 }
 
-/**
- * Get app access token using client credentials flow
- * This mirrors the logic in auth/oauth.ts EbayOAuthClient.getOrRefreshAppAccessToken()
- */
 async function getAppAccessToken(
   clientId: string,
   clientSecret: string,
-  environment: 'sandbox' | 'production'
+  environment: 'sandbox' | 'production',
 ): Promise<string> {
-  const tokenUrl =
-    environment === 'production'
-      ? 'https://api.ebay.com/identity/v1/oauth2/token'
-      : 'https://api.sandbox.ebay.com/identity/v1/oauth2/token';
-
+  const baseUrl =
+    environment === 'production' ? 'https://api.ebay.com' : 'https://api.sandbox.ebay.com';
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
   const response = await axios.post(
-    tokenUrl,
+    `${baseUrl}/identity/v1/oauth2/token`,
     new URLSearchParams({
       grant_type: 'client_credentials',
       scope: 'https://api.ebay.com/oauth/api_scope',
     }).toString(),
-    {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${credentials}`,
-      },
-    }
+    { headers: { Authorization: `Basic ${credentials}`, 'Content-Type': 'application/x-www-form-urlencoded' } },
   );
-
   return response.data.access_token;
 }
 
-/**
- * Refresh access token using refresh token
- */
-async function refreshAccessToken(
-  refreshToken: string,
-  clientId: string,
-  clientSecret: string,
-  environment: 'sandbox' | 'production'
-): Promise<{ accessToken: string; expiresIn: number }> {
-  const tokenUrl =
-    environment === 'production'
-      ? 'https://api.ebay.com/identity/v1/oauth2/token'
-      : 'https://api.sandbox.ebay.com/identity/v1/oauth2/token';
-
-  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
-  const response = await axios.post(
-    tokenUrl,
-    new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }).toString(),
-    {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${credentials}`,
-      },
-    }
-  );
-
-  return {
-    accessToken: response.data.access_token,
-    expiresIn: response.data.expires_in,
-  };
-}
-
-/**
- * Verify refresh token by getting an access token and fetching user info
- */
 async function verifyRefreshToken(
   refreshToken: string,
   clientId: string,
   clientSecret: string,
-  environment: 'sandbox' | 'production'
+  environment: 'sandbox' | 'production',
 ): Promise<{ accessToken: string; userInfo: EbayUserInfo }> {
-  // First, refresh to get an access token
-  const { accessToken } = await refreshAccessToken(
-    refreshToken,
-    clientId,
-    clientSecret,
-    environment
+  const baseUrl =
+    environment === 'production' ? 'https://api.ebay.com' : 'https://api.sandbox.ebay.com';
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const tokenResponse = await axios.post(
+    `${baseUrl}/identity/v1/oauth2/token`,
+    new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope:
+        'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory',
+    }).toString(),
+    { headers: { Authorization: `Basic ${credentials}`, 'Content-Type': 'application/x-www-form-urlencoded' } },
   );
-
-  // Then fetch user info to verify everything works
-  const userInfo = await fetchEbayUserInfo(accessToken, environment);
-
-  return { accessToken, userInfo };
+  const accessToken = tokenResponse.data.access_token;
+  const identityBase =
+    environment === 'production' ? 'https://apiz.ebay.com' : 'https://apiz.sandbox.ebay.com';
+  const userResponse = await axios.get(`${identityBase}/commerce/identity/v1/user/`, {
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  });
+  return { accessToken, userInfo: userResponse.data };
 }
 
-/**
- * Fetch eBay user info using the Identity API
- * Uses apiz.ebay.com subdomain as per eBay API requirements
- */
 async function fetchEbayUserInfo(
   accessToken: string,
-  environment: 'sandbox' | 'production'
+  environment: 'sandbox' | 'production',
 ): Promise<EbayUserInfo> {
-  const identityBaseUrl =
+  const identityBase =
     environment === 'production' ? 'https://apiz.ebay.com' : 'https://apiz.sandbox.ebay.com';
-
-  const response = await axios.get(`${identityBaseUrl}/commerce/identity/v1/user/`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
+  const response = await axios.get(`${identityBase}/commerce/identity/v1/user/`, {
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
   });
-
   return response.data;
 }
 
-/**
- * Display eBay user info in a formatted box
- */
-function displayUserInfo(userInfo: EbayUserInfo): void {
-  const accountName =
-    userInfo.individualAccount?.firstName && userInfo.individualAccount?.lastName
-      ? `${userInfo.individualAccount.firstName} ${userInfo.individualAccount.lastName}`
-      : userInfo.businessAccount?.name || 'N/A';
-
-  const email = userInfo.individualAccount?.email || userInfo.businessAccount?.email || 'N/A';
-
-  const marketplaceMap: Record<string, string> = {
-    EBAY_US: 'eBay United States',
-    EBAY_GB: 'eBay United Kingdom',
-    EBAY_DE: 'eBay Germany',
-    EBAY_AU: 'eBay Australia',
-    EBAY_CA: 'eBay Canada',
-    EBAY_FR: 'eBay France',
-    EBAY_IT: 'eBay Italy',
-    EBAY_ES: 'eBay Spain',
-  };
-
-  const marketplace =
-    marketplaceMap[userInfo.registrationMarketplaceId || ''] ||
-    userInfo.registrationMarketplaceId ||
-    'N/A';
-
-  showBox('eBay Account Verified', [
-    `Username:        ${userInfo.username}`,
-    `Account Name:    ${accountName}`,
-    `Email:           ${email}`,
-    `Account Type:    ${userInfo.accountType || 'N/A'}`,
-    `Marketplace:     ${marketplace}`,
-    `User ID:         ${userInfo.userId?.slice(0, 30)}...`,
-  ]);
-}
-
-/**
- * Render an informational line.
- */
-function showInfo(message: string): void {
-  console.log(`  ${ui.info('ℹ')} ${message}`);
-}
-
-/**
- * Render a spinner and return a stop callback.
- */
-function showSpinner(message: string): () => void {
-  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  let i = 0;
-
-  process.stdout.write(`  ${ui.info(frames[0])} ${message}`);
-
-  const interval = setInterval(() => {
-    i = (i + 1) % frames.length;
-    process.stdout.write(`\r  ${ui.info(frames[i])} ${message}`);
-  }, 80);
-
-  return () => {
-    clearInterval(interval);
-    process.stdout.write('\r' + ' '.repeat(message.length + 10) + '\r');
-  };
-}
-
-/**
- * Render a bordered info box.
- */
-function showBox(title: string, content: string[]): void {
-  const width = 60;
-  const line = '─'.repeat(width - 2);
-
-  console.log(`\n  ${ui.dim('┌' + line + '┐')}`);
-  console.log(`  ${ui.dim('│')} ${ui.bold(title.padEnd(width - 3))}${ui.dim('│')}`);
-  console.log(`  ${ui.dim('├' + line + '┤')}`);
-
-  for (const item of content) {
-    const displayItem = item.length > width - 4 ? item.slice(0, width - 7) + '...' : item;
-    console.log(`  ${ui.dim('│')} ${displayItem.padEnd(width - 3)}${ui.dim('│')}`);
-  }
-
-  console.log(`  ${ui.dim('└' + line + '┘')}\n`);
-}
-
-/**
- * Compute MCP client config paths by OS.
- */
 function getConfigPaths(): Record<string, { display: string; path: string }> {
   const home = homedir();
   const os = platform();
   const paths: Record<string, { display: string; path: string }> = {};
-
   if (os === 'darwin') {
     paths.claude = {
       display: 'Claude Desktop',
@@ -504,7 +198,7 @@ function getConfigPaths(): Record<string, { display: string; path: string }> {
       display: 'Cline (VSCode)',
       path: join(
         home,
-        'Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json'
+        'Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json',
       ),
     };
   } else if (os === 'win32') {
@@ -516,7 +210,7 @@ function getConfigPaths(): Record<string, { display: string; path: string }> {
       display: 'Cline (VSCode)',
       path: join(
         home,
-        'AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json'
+        'AppData/Roaming/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json',
       ),
     };
   } else {
@@ -528,62 +222,34 @@ function getConfigPaths(): Record<string, { display: string; path: string }> {
       display: 'Cline (VSCode)',
       path: join(
         home,
-        '.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json'
+        '.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json',
       ),
     };
   }
-
-  paths.continue = {
-    display: 'Continue.dev',
-    path: join(home, '.continue/config.json'),
-  };
-
+  paths.continue = { display: 'Continue.dev', path: join(home, '.continue/config.json') };
   return paths;
 }
 
-/**
- * Detect installed MCP-compatible clients.
- */
 function detectLLMClients(): LLMClient[] {
-  const paths = getConfigPaths();
-  const clients: LLMClient[] = [];
-
-  for (const [name, info] of Object.entries(paths)) {
-    const configExists = existsSync(info.path);
-    const parentExists = existsSync(dirname(info.path));
-
-    clients.push({
-      name,
-      displayName: info.display,
-      configPath: info.path,
-      detected: parentExists,
-      configExists,
-    });
-  }
-
-  return clients;
+  return Object.entries(getConfigPaths()).map(([name, info]) => ({
+    name,
+    displayName: info.display,
+    configPath: info.path,
+    detected: existsSync(dirname(info.path)),
+    configExists: existsSync(info.path),
+  }));
 }
 
-/**
- * Write MCP server config for a detected client.
- */
 function configureLLMClient(client: LLMClient, projectRoot: string): boolean {
   try {
     const configDir = dirname(client.configPath);
-    if (!existsSync(configDir)) {
-      mkdirSync(configDir, { recursive: true });
-    }
-
+    if (!existsSync(configDir)) mkdirSync(configDir, { recursive: true });
     interface McpConfig {
       mcpServers?: Record<string, unknown>;
-      experimental?: {
-        modelContextProtocolServers?: unknown[];
-      };
+      experimental?: { modelContextProtocolServers?: unknown[] };
       [key: string]: unknown;
     }
-
     let existingConfig: McpConfig = {};
-
     if (existsSync(client.configPath)) {
       try {
         existingConfig = JSON.parse(readFileSync(client.configPath, 'utf-8')) as McpConfig;
@@ -591,31 +257,21 @@ function configureLLMClient(client: LLMClient, projectRoot: string): boolean {
         existingConfig = {};
       }
     }
-
-    const serverConfig = {
-      command: 'node',
-      args: [join(projectRoot, 'build/index.js')],
-    };
-
+    const serverConfig = { command: 'node', args: [join(projectRoot, 'build/index.js')] };
     if (client.name === 'continue') {
       if (!existingConfig.experimental) existingConfig.experimental = {};
-      if (!existingConfig.experimental.modelContextProtocolServers) {
+      if (!existingConfig.experimental.modelContextProtocolServers)
         existingConfig.experimental.modelContextProtocolServers = [];
-      }
       const servers = existingConfig.experimental.modelContextProtocolServers as unknown[];
-      const existingIndex = servers.findIndex((s: unknown) =>
-        (s as { command?: string; args?: string[] })?.args?.[0]?.includes('ebay-mcp')
+      const idx = servers.findIndex((s: unknown) =>
+        (s as { args?: string[] })?.args?.[0]?.includes('ebay-mcp'),
       );
-      if (existingIndex >= 0) {
-        servers[existingIndex] = serverConfig;
-      } else {
-        servers.push(serverConfig);
-      }
+      if (idx >= 0) servers[idx] = serverConfig;
+      else servers.push(serverConfig);
     } else {
       if (!existingConfig.mcpServers) existingConfig.mcpServers = {};
       existingConfig.mcpServers['ebay'] = serverConfig;
     }
-
     writeFileSync(client.configPath, JSON.stringify(existingConfig, null, 2));
     return true;
   } catch {
@@ -623,169 +279,91 @@ function configureLLMClient(client: LLMClient, projectRoot: string): boolean {
   }
 }
 
-/**
- * Get Claude Desktop config path for the current platform
- */
 function getClaudeDesktopConfigPath(): string {
   const home = homedir();
   const os = platform();
-
-  if (os === 'darwin') {
+  if (os === 'darwin')
     return join(home, 'Library/Application Support/Claude/claude_desktop_config.json');
-  } else if (os === 'win32') {
-    return join(home, 'AppData/Roaming/Claude/claude_desktop_config.json');
-  } else {
-    return join(home, '.config/Claude/claude_desktop_config.json');
-  }
+  if (os === 'win32') return join(home, 'AppData/Roaming/Claude/claude_desktop_config.json');
+  return join(home, '.config/Claude/claude_desktop_config.json');
 }
 
-/**
- * Check if Claude Desktop is installed
- */
 function isClaudeDesktopInstalled(): boolean {
-  const configPath = getClaudeDesktopConfigPath();
-  const configDir = dirname(configPath);
-  return existsSync(configDir);
+  return existsSync(dirname(getClaudeDesktopConfigPath()));
 }
 
-/**
- * Update Claude Desktop config with eBay MCP server credentials
- * This ensures Claude Desktop has access to the verified tokens
- * IMPORTANT: This preserves all existing mcpServers and other config
- */
 function updateClaudeDesktopConfig(
   envConfig: Record<string, string>,
-  environment: string
+  environment: string,
 ): { success: boolean; configPath: string; error?: string; details?: string } {
   const configPath = getClaudeDesktopConfigPath();
-  const configDir = dirname(configPath);
-
-  // Check if Claude Desktop is installed
-  if (!existsSync(configDir)) {
+  if (!existsSync(dirname(configPath)))
     return { success: false, configPath, error: 'Claude Desktop not installed' };
-  }
-
   try {
-    // Read existing config - preserve everything
-    let existingConfig: Record<string, unknown> = {};
-
+    let existing: Record<string, unknown> = {};
     if (existsSync(configPath)) {
       try {
-        const fileContent = readFileSync(configPath, 'utf-8');
-        existingConfig = JSON.parse(fileContent) as Record<string, unknown>;
-      } catch (parseError) {
-        // If JSON is invalid, start fresh but warn user
+        existing = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      } catch (e) {
         return {
           success: false,
           configPath,
-          error: `Invalid JSON in config file: ${parseError instanceof Error ? parseError.message : 'Parse error'}`,
+          error: `Invalid JSON in config: ${e instanceof Error ? e.message : 'parse error'}`,
           details: 'Please fix the JSON syntax in your Claude config file',
         };
       }
     }
-
-    // Ensure mcpServers exists as an object
-    if (!existingConfig.mcpServers || typeof existingConfig.mcpServers !== 'object') {
-      existingConfig.mcpServers = {};
-    }
-
-    const mcpServers = existingConfig.mcpServers as Record<string, unknown>;
-
-    // Build env object with all credentials
-    const envVars: Record<string, string> = {
-      EBAY_ENVIRONMENT: environment,
-    };
-
-    if (envConfig.EBAY_CLIENT_ID) {
-      envVars.EBAY_CLIENT_ID = envConfig.EBAY_CLIENT_ID;
-    }
-    if (envConfig.EBAY_CLIENT_SECRET) {
-      envVars.EBAY_CLIENT_SECRET = envConfig.EBAY_CLIENT_SECRET;
-    }
-    if (envConfig.EBAY_REDIRECT_URI) {
-      envVars.EBAY_REDIRECT_URI = envConfig.EBAY_REDIRECT_URI;
-    }
-    if (envConfig.EBAY_MARKETPLACE_ID) {
-      envVars.EBAY_MARKETPLACE_ID = envConfig.EBAY_MARKETPLACE_ID;
-    }
-    if (envConfig.EBAY_CONTENT_LANGUAGE) {
+    if (!existing.mcpServers || typeof existing.mcpServers !== 'object') existing.mcpServers = {};
+    const mcpServers = existing.mcpServers as Record<string, unknown>;
+    const envVars: Record<string, string> = { EBAY_ENVIRONMENT: environment };
+    if (envConfig.EBAY_CLIENT_ID) envVars.EBAY_CLIENT_ID = envConfig.EBAY_CLIENT_ID;
+    if (envConfig.EBAY_CLIENT_SECRET) envVars.EBAY_CLIENT_SECRET = envConfig.EBAY_CLIENT_SECRET;
+    if (envConfig.EBAY_REDIRECT_URI) envVars.EBAY_REDIRECT_URI = envConfig.EBAY_REDIRECT_URI;
+    if (envConfig.EBAY_MARKETPLACE_ID) envVars.EBAY_MARKETPLACE_ID = envConfig.EBAY_MARKETPLACE_ID;
+    if (envConfig.EBAY_CONTENT_LANGUAGE)
       envVars.EBAY_CONTENT_LANGUAGE = envConfig.EBAY_CONTENT_LANGUAGE;
-    }
-    if (envConfig.EBAY_USER_REFRESH_TOKEN) {
+    if (envConfig.EBAY_USER_REFRESH_TOKEN)
       envVars.EBAY_USER_REFRESH_TOKEN = envConfig.EBAY_USER_REFRESH_TOKEN;
-    }
-    // Only include access tokens if they exist and are not empty
-    if (envConfig.EBAY_USER_ACCESS_TOKEN && envConfig.EBAY_USER_ACCESS_TOKEN.startsWith('v^')) {
+    if (envConfig.EBAY_USER_ACCESS_TOKEN?.startsWith('v^'))
       envVars.EBAY_USER_ACCESS_TOKEN = envConfig.EBAY_USER_ACCESS_TOKEN;
-    }
-    if (envConfig.EBAY_APP_ACCESS_TOKEN && envConfig.EBAY_APP_ACCESS_TOKEN.startsWith('v^')) {
+    if (envConfig.EBAY_APP_ACCESS_TOKEN?.startsWith('v^'))
       envVars.EBAY_APP_ACCESS_TOKEN = envConfig.EBAY_APP_ACCESS_TOKEN;
-    }
-
-    // Add or update only the 'ebay' server - preserve all other servers
-    // Use npx with --yes flag and suppress npm/node output to keep stdout clean for MCP
     mcpServers['ebay'] = {
       command: 'npx',
       args: ['--yes', '--quiet', 'ebay-mcp'],
-      env: {
-        ...envVars,
-        NODE_NO_WARNINGS: '1',
-        NPM_CONFIG_UPDATE_NOTIFIER: 'false',
-      },
+      env: { ...envVars, NODE_NO_WARNINGS: '1', NPM_CONFIG_UPDATE_NOTIFIER: 'false' },
     };
-
-    // Write back the complete config with proper formatting
-    writeFileSync(configPath, JSON.stringify(existingConfig, null, 2));
-
-    // Count existing servers for confirmation message
-    const serverCount = Object.keys(mcpServers).length;
+    writeFileSync(configPath, JSON.stringify(existing, null, 2));
     const otherServers = Object.keys(mcpServers).filter((k) => k !== 'ebay');
-
     return {
       success: true,
       configPath,
       details:
         otherServers.length > 0
           ? `Preserved ${otherServers.length} existing server(s): ${otherServers.join(', ')}`
-          : `Added ebay server (${serverCount} total)`,
+          : `Added ebay server (${Object.keys(mcpServers).length} total)`,
     };
   } catch (error) {
-    return {
-      success: false,
-      configPath,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    return { success: false, configPath, error: error instanceof Error ? error.message : 'Unknown' };
   }
 }
 
-/**
- * Load existing environment variables from the .env file.
- */
 function loadExistingConfig(): Record<string, string> {
   const envPath = join(PROJECT_ROOT, '.env');
   const envConfig: Record<string, string> = {};
-
-  if (existsSync(envPath)) {
-    const content = readFileSync(envPath, 'utf-8');
-    for (const line of content.split('\n')) {
-      if (line.trim() && !line.startsWith('#')) {
-        const [key, ...valueParts] = line.split('=');
-        const value = valueParts.join('=').trim();
-        if (key && value && !value.includes('_here')) {
-          envConfig[key.trim()] = value;
-        }
-      }
+  if (!existsSync(envPath)) return envConfig;
+  for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
+    if (line.trim() && !line.startsWith('#')) {
+      const [key, ...valueParts] = line.split('=');
+      const value = valueParts.join('=').trim();
+      if (key && value && !value.includes('_here')) envConfig[key.trim()] = value;
     }
   }
-
   return envConfig;
 }
 
-/**
- * Format a date for display in the .env header.
- */
 function formatDate(date: Date): string {
-  const options: Intl.DateTimeFormatOptions = {
+  return date.toLocaleString('en-US', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
@@ -794,26 +372,21 @@ function formatDate(date: Date): string {
     minute: '2-digit',
     second: '2-digit',
     timeZoneName: 'short',
-  };
-  return date.toLocaleString('en-US', options);
+  });
 }
 
-/**
- * Persist setup configuration to the project .env file.
- */
 function saveConfig(envConfig: Record<string, string>, environment: string): void {
   const envPath = join(PROJECT_ROOT, '.env');
-  const now = new Date();
-
   const marketplaceLine = envConfig.EBAY_MARKETPLACE_ID
     ? `EBAY_MARKETPLACE_ID=${envConfig.EBAY_MARKETPLACE_ID}`
     : '# EBAY_MARKETPLACE_ID=EBAY_US';
   const contentLanguageLine = envConfig.EBAY_CONTENT_LANGUAGE
     ? `EBAY_CONTENT_LANGUAGE=${envConfig.EBAY_CONTENT_LANGUAGE}`
     : '# EBAY_CONTENT_LANGUAGE=en-US';
-
-  const content = `# eBay MCP Server Configuration
-# Last Updated: ${formatDate(now)}
+  writeFileSync(
+    envPath,
+    `# eBay MCP Server Configuration
+# Last Updated: ${formatDate(new Date())}
 # Environment: ${environment}
 
 EBAY_CLIENT_ID=${envConfig.EBAY_CLIENT_ID || ''}
@@ -826,929 +399,502 @@ ${contentLanguageLine}
 EBAY_USER_REFRESH_TOKEN=${envConfig.EBAY_USER_REFRESH_TOKEN || ''}
 EBAY_USER_ACCESS_TOKEN=${envConfig.EBAY_USER_ACCESS_TOKEN || ''}
 EBAY_APP_ACCESS_TOKEN=${envConfig.EBAY_APP_ACCESS_TOKEN || ''}
-`;
-
-  writeFileSync(envPath, content, 'utf-8');
-}
-
-async function stepWelcome(state: SetupState): Promise<StepResult> {
-  clearScreen();
-  showLogo();
-
-  console.log(ui.dim('  Welcome to the eBay MCP Server setup wizard!\n'));
-  console.log('  This wizard will help you:\n');
-  console.log(`    ${ui.success('1.')} Choose environment (sandbox/production)`);
-  console.log(`    ${ui.success('2.')} Set default marketplace and language (optional)`);
-  console.log(`    ${ui.success('3.')} Configure your eBay Developer credentials`);
-  console.log(`    ${ui.success('4.')} Set up OAuth authentication`);
-  console.log(`    ${ui.success('5.')} Configure your MCP client (Claude, Cline, etc.)`);
-  console.log(`    ${ui.success('6.')} Validate your setup\n`);
-
-  if (state.hasExistingConfig) {
-    showInfo('Existing configuration detected. You can update or keep current values.');
-  }
-
-  showKeyboardHints(['Enter: Continue', 'Ctrl+C: Exit']);
-
-  const response = await prompts({
-    type: 'confirm',
-    name: 'continue',
-    message: 'Ready to begin?',
-    initial: true,
-  });
-
-  return response.continue !== false ? 'continue' : 'cancel';
-}
-
-/**
- * Select the eBay environment for this configuration.
- */
-async function stepEnvironment(state: SetupState): Promise<StepResult> {
-  clearScreen();
-  showLogo();
-  showProgress(1, 'Select Environment');
-
-  console.log('  Choose which eBay environment to configure:\n');
-
-  showBox('Environment Options', [
-    '🧪 Sandbox  - For development & testing',
-    '   • Free test transactions',
-    '   • No real money involved',
-    '   • Separate test accounts',
-    '',
-    '🚀 Production - For live trading',
-    '   • Real transactions',
-    '   • Actual eBay marketplace',
-    '   • Requires approved app',
-  ]);
-
-  showTip('Start with Sandbox to test your integration safely.');
-
-  const response = await prompts({
-    type: 'select',
-    name: 'environment',
-    message: 'Select environment:',
-    choices: [
-      { title: '🧪 Sandbox (Recommended for testing)', value: 'sandbox' },
-      { title: '🚀 Production (Live trading)', value: 'production' },
-      { title: ui.dim('← Go back'), value: 'back' },
-    ],
-    initial: state.config.EBAY_ENVIRONMENT === 'production' ? 1 : 0,
-  });
-
-  if (!response.environment) return 'cancel';
-  if (response.environment === 'back') return 'back';
-
-  state.environment = response.environment;
-  state.config.EBAY_ENVIRONMENT = response.environment;
-  return 'continue';
-}
-
-/**
- * Configure optional marketplace and content-language defaults.
- */
-async function stepMarketplaceSettings(state: SetupState): Promise<StepResult> {
-  clearScreen();
-  showLogo();
-  showProgress(2, 'Marketplace Settings');
-
-  if (state.isQuickMode) {
-    showInfo('Quick setup enabled. Skipping optional marketplace configuration.');
-    await new Promise((r) => setTimeout(r, 600));
-    return 'continue';
-  }
-
-  console.log('  Configure default marketplace and language for API requests.\n');
-  showBox('Marketplace Settings', [
-    'These are optional defaults used for request headers.',
-    'Marketplace can be overridden in many tools; language is global.',
-  ]);
-
-  const marketplaceChoices = [
-    { title: ui.dim('← Go back'), value: '__back__' },
-    { title: 'Skip (leave unset)', value: '' },
-    ...MARKETPLACE_OPTIONS.map((option) => ({
-      title: option.label,
-      value: option.value,
-    })),
-    { title: 'Other (enter manually)', value: '__custom__' },
-  ];
-
-  const currentMarketplace = state.config.EBAY_MARKETPLACE_ID || '';
-  const marketplaceDefault = currentMarketplace || 'EBAY_US';
-  const marketplaceMatchIndex = marketplaceChoices.findIndex(
-    (choice) => choice.value === marketplaceDefault
+`,
+    'utf-8',
   );
-  const marketplaceInitial =
-    marketplaceMatchIndex >= 0
-      ? marketplaceMatchIndex
-      : marketplaceChoices.findIndex((choice) => choice.value === '__custom__');
-
-  const marketplaceResponse = await prompts({
-    type: 'select',
-    name: 'marketplaceId',
-    message: 'Select your default eBay marketplace:',
-    choices: marketplaceChoices,
-    initial: marketplaceInitial >= 0 ? marketplaceInitial : 0,
-  });
-
-  if (marketplaceResponse.marketplaceId === undefined) {
-    return 'cancel';
-  }
-  if (marketplaceResponse.marketplaceId === '__back__') {
-    return 'back';
-  }
-
-  let marketplaceId = marketplaceResponse.marketplaceId as string;
-  if (marketplaceId === '__custom__') {
-    const customMarketplace = await prompts({
-      type: 'text',
-      name: 'customMarketplaceId',
-      message: 'Enter marketplace ID (e.g., EBAY_US, EBAY_DE):',
-      initial: currentMarketplace || 'EBAY_US',
-      validate: (value: string) =>
-        value.trim().length === 0 ? 'Marketplace ID cannot be empty' : true,
-    });
-
-    if (customMarketplace.customMarketplaceId === undefined) {
-      return 'cancel';
-    }
-
-    marketplaceId = customMarketplace.customMarketplaceId.trim();
-  }
-
-  if (marketplaceId) {
-    state.config.EBAY_MARKETPLACE_ID = marketplaceId;
-  } else {
-    delete state.config.EBAY_MARKETPLACE_ID;
-  }
-
-  const languageChoices = [
-    { title: ui.dim('← Go back'), value: '__back__' },
-    { title: 'Skip (leave unset)', value: '' },
-    ...CONTENT_LANGUAGE_OPTIONS.map((option) => ({
-      title: option.label,
-      value: option.value,
-    })),
-    { title: 'Other (enter manually)', value: '__custom__' },
-  ];
-
-  const currentLanguage = state.config.EBAY_CONTENT_LANGUAGE || '';
-  const languageDefault = currentLanguage || 'en-US';
-  const languageMatchIndex = languageChoices.findIndex(
-    (choice) => choice.value === languageDefault
-  );
-  const languageInitial =
-    languageMatchIndex >= 0
-      ? languageMatchIndex
-      : languageChoices.findIndex((choice) => choice.value === '__custom__');
-
-  const languageResponse = await prompts({
-    type: 'select',
-    name: 'contentLanguage',
-    message: 'Select your preferred Content-Language:',
-    choices: languageChoices,
-    initial: languageInitial >= 0 ? languageInitial : 0,
-  });
-
-  if (languageResponse.contentLanguage === undefined) {
-    return 'cancel';
-  }
-  if (languageResponse.contentLanguage === '__back__') {
-    return 'back';
-  }
-
-  let contentLanguage = languageResponse.contentLanguage as string;
-  if (contentLanguage === '__custom__') {
-    const customLanguage = await prompts({
-      type: 'text',
-      name: 'customContentLanguage',
-      message: 'Enter Content-Language (e.g., en-US, de-DE):',
-      initial: currentLanguage || 'en-US',
-      validate: (value: string) =>
-        value.trim().length === 0 ? 'Content-Language cannot be empty' : true,
-    });
-
-    if (customLanguage.customContentLanguage === undefined) {
-      return 'cancel';
-    }
-
-    contentLanguage = customLanguage.customContentLanguage.trim();
-  }
-
-  if (contentLanguage) {
-    state.config.EBAY_CONTENT_LANGUAGE = contentLanguage;
-  } else {
-    delete state.config.EBAY_CONTENT_LANGUAGE;
-  }
-
-  return 'continue';
 }
 
-/**
- * Collect eBay app credentials from the user.
- */
-async function stepCredentials(state: SetupState): Promise<StepResult> {
-  clearScreen();
-  showLogo();
-  showProgress(3, 'eBay Credentials');
-
-  console.log('  Enter your eBay Developer credentials:\n');
-
-  showTip('Get credentials at: https://developer.ebay.com/my/keys');
-  showKeyboardHints(['Tab: Next field', 'Enter: Submit', 'Ctrl+C: Cancel']);
-
-  // First ask if they want to go back
-  const navChoice = await prompts({
-    type: 'select',
-    name: 'action',
-    message: 'What would you like to do?',
-    choices: [
-      { title: '📝 Enter/update credentials', value: 'enter' },
-      { title: ui.dim('← Go back'), value: 'back' },
-    ],
-    initial: 0,
-  });
-
-  if (!navChoice.action) return 'cancel';
-  if (navChoice.action === 'back') return 'back';
-
-  const responses = await prompts([
-    {
-      type: 'text',
-      name: 'clientId',
-      message: 'Client ID (App ID):',
-      initial: state.config.EBAY_CLIENT_ID || '',
-      validate: (v: string) => v.trim().length > 0 || 'Required',
-    },
-    {
-      type: 'password',
-      name: 'clientSecret',
-      message: 'Client Secret (Cert ID):',
-      initial: state.config.EBAY_CLIENT_SECRET || '',
-      validate: (v: string) => v.trim().length > 0 || 'Required',
-    },
-    {
-      type: 'text',
-      name: 'redirectUri',
-      message: 'Redirect URI (RuName):',
-      initial: state.config.EBAY_REDIRECT_URI || '',
-      validate: (v: string) => v.trim().length > 0 || 'Required',
-    },
-  ]);
-
-  if (!responses.clientId) return 'cancel';
-
-  state.config.EBAY_CLIENT_ID = responses.clientId;
-  state.config.EBAY_CLIENT_SECRET = responses.clientSecret;
-  state.config.EBAY_REDIRECT_URI = responses.redirectUri;
-
-  return 'continue';
+function showInfo(message: string): void {
+  console.log(`  ${ui.info('ℹ')} ${message}`);
 }
 
-/**
- * Acquire and validate OAuth tokens for the configured credentials.
- */
-async function stepOAuth(state: SetupState): Promise<StepResult> {
-  clearScreen();
-  showLogo();
-  showProgress(4, 'OAuth Setup');
+function showWarning(message: string): void {
+  console.log(`  ${ui.warning('⚠')} ${message}`);
+}
 
-  console.log('  Configure user authentication for higher API rate limits:\n');
+function showSuccess(message: string): void {
+  console.log(`  ${ui.success('✓')} ${message}`);
+}
 
-  showBox('Rate Limits by Auth Type', [
-    'App Credentials Only:     1,000 req/day',
-    'User Token (OAuth):    10,000-50,000 req/day',
-    '',
-    'User tokens require completing an OAuth flow.',
-  ]);
+function showError(message: string): void {
+  console.log(`  ${ui.error('✗')} ${message}`);
+}
 
-  const hasToken = state.config.EBAY_USER_REFRESH_TOKEN?.startsWith('v^1.1#');
+function showSpinner(message: string): () => void {
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let i = 0;
+  process.stdout.write(`  ${frames[0]}  ${message}`);
+  const interval = setInterval(() => {
+    process.stdout.write(`\r  ${frames[i++ % frames.length]}  ${message}`);
+  }, 80);
+  return () => {
+    clearInterval(interval);
+    process.stdout.write('\r' + ' '.repeat(message.length + 6) + '\r');
+  };
+}
 
-  if (hasToken) {
-    showSuccess('Existing refresh token detected.');
+function displayUserInfo(userInfo: EbayUserInfo): void {
+  const name =
+    userInfo.individualAccount?.firstName && userInfo.individualAccount?.lastName
+      ? `${userInfo.individualAccount.firstName} ${userInfo.individualAccount.lastName}`
+      : userInfo.businessAccount?.name || 'N/A';
+  const email = userInfo.individualAccount?.email || userInfo.businessAccount?.email || 'N/A';
+  const marketplaceMap: Record<string, string> = {
+    EBAY_US: 'eBay United States', EBAY_GB: 'eBay United Kingdom',
+    EBAY_DE: 'eBay Germany', EBAY_AU: 'eBay Australia',
+    EBAY_CA: 'eBay Canada', EBAY_FR: 'eBay France',
+    EBAY_IT: 'eBay Italy', EBAY_ES: 'eBay Spain',
+  };
+  const marketplace =
+    marketplaceMap[userInfo.registrationMarketplaceId || ''] ||
+    userInfo.registrationMarketplaceId ||
+    'N/A';
+  console.log(`  ${ui.dim('┌─ eBay Account Verified ─────────────────────────')}`);
+  console.log(`  ${ui.dim('│')} Username:     ${userInfo.username}`);
+  console.log(`  ${ui.dim('│')} Name:         ${name}`);
+  console.log(`  ${ui.dim('│')} Email:        ${email}`);
+  console.log(`  ${ui.dim('│')} Type:         ${userInfo.accountType || 'N/A'}`);
+  console.log(`  ${ui.dim('│')} Marketplace:  ${marketplace}`);
+  console.log(`  ${ui.dim('└─────────────────────────────────────────────────')}`);
+  console.log('');
+}
 
-    const keepToken = await prompts({
-      type: 'select',
-      name: 'action',
-      message: 'What would you like to do?',
-      choices: [
-        { title: '✓ Keep and verify existing token', value: 'keep' },
-        { title: '🔄 Set up new OAuth token', value: 'new' },
-        { title: ui.dim('← Go back'), value: 'back' },
-      ],
-      initial: 0,
-    });
+// ─── Grimoire wizard ──────────────────────────────────────────────────────────
 
-    if (!keepToken.action) return 'cancel';
-    if (keepToken.action === 'back') return 'back';
+export async function runSetup(): Promise<void> {
+  const existingConfig = loadExistingConfig();
+  const detectedClients = detectLLMClients();
+  const availableClients = detectedClients.filter((c) => c.detected);
 
-    if (keepToken.action === 'keep') {
-      // Verify the existing token works by fetching user info
-      console.log('\n  ' + ui.info('Verifying existing refresh token...'));
-      try {
-        const { accessToken, userInfo } = await verifyRefreshToken(
-          state.config.EBAY_USER_REFRESH_TOKEN,
-          state.config.EBAY_CLIENT_ID,
-          state.config.EBAY_CLIENT_SECRET,
-          state.environment
-        );
-        showSuccess('Refresh token verified successfully!');
-        state.config.EBAY_USER_ACCESS_TOKEN = accessToken;
-        displayUserInfo(userInfo);
+  const tokens: {
+    refreshToken?: string;
+    accessToken?: string;
+    appAccessToken?: string;
+  } = {};
 
-        // Update Claude Desktop config if installed
-        if (isClaudeDesktopInstalled()) {
-          console.log('  ' + ui.info('Updating Claude Desktop configuration...'));
-          const claudeResult = updateClaudeDesktopConfig(state.config, state.environment);
-          if (claudeResult.success) {
-            showSuccess('Claude Desktop config updated!');
-            if (claudeResult.details) {
-              showInfo(claudeResult.details);
-            }
-            showInfo(`Config: ${claudeResult.configPath}`);
-          } else {
-            showError(`Could not update Claude Desktop: ${claudeResult.error}`);
-            if (claudeResult.details) {
-              showInfo(claudeResult.details);
-            }
-          }
-        } else {
-          showInfo('Claude Desktop not detected. You can configure it manually later.');
-        }
-        console.log('');
-        showKeyboardHints(['Enter: Continue to next step']);
-        await prompts({ type: 'text', name: 'continue', message: 'Press Enter to continue...' });
-      } catch (error) {
-        const errorMsg = axios.isAxiosError(error)
-          ? error.response?.data?.error_description ||
-            error.response?.data?.errors?.[0]?.message ||
-            error.message
-          : error instanceof Error
-            ? error.message
-            : 'Unknown error';
-        showError(`Token verification failed: ${errorMsg}`);
+  const finalStepId = availableClients.length > 0 ? 'mcp-clients' : 'no-mcp-clients';
 
-        // Provide specific guidance based on error type
-        if (errorMsg.toLowerCase().includes('access denied')) {
-          showWarning('Your token may be missing required OAuth scopes.');
-          showInfo('Generating a new token via OAuth URL will include all necessary scopes.');
-        } else {
-          showWarning('Your existing refresh token may be expired or invalid.');
-        }
-
-        const continueAnyway = await prompts({
-          type: 'confirm',
-          name: 'continue',
-          message: 'Would you like to set up a new OAuth token?',
-          initial: true,
-        });
-
-        if (!continueAnyway.continue) {
-          showInfo("Keeping existing token. You may need to re-authenticate if it doesn't work.");
-          return 'continue';
-        }
-        // Clear invalid tokens so we fall through to OAuth setup options
-        state.config.EBAY_USER_ACCESS_TOKEN = '';
-        state.config.EBAY_USER_REFRESH_TOKEN = '';
-      }
-
-      if (state.config.EBAY_USER_ACCESS_TOKEN) {
-        return 'continue';
-      }
-    }
-    // User chose 'new' - fall through to OAuth setup options
-  }
-
-  // Check if we just cleared tokens due to failure (recommend OAuth URL in that case)
-  const hadTokenFailure = hasToken && !state.config.EBAY_USER_REFRESH_TOKEN;
-
-  const tokenChoice = await prompts({
-    type: 'select',
-    name: 'method',
-    message: 'How would you like to set up OAuth?',
-    choices: hadTokenFailure
-      ? [
-          // After token failure, prioritize OAuth URL to get fresh token with proper scopes
-          { title: '🔗 Generate OAuth URL (recommended)', value: 'manual' },
-          { title: '🔑 Paste authorization code (already have code)', value: 'code' },
-          { title: '📝 I have a different refresh token', value: 'existing' },
-          { title: '⏭️  Skip for now (1k req/day limit)', value: 'skip' },
-          { title: ui.dim('← Go back'), value: 'back' },
-        ]
-      : [
-          { title: '📝 I have a refresh token', value: 'existing' },
-          { title: '🔗 Generate OAuth URL (opens browser)', value: 'manual' },
-          { title: '🔑 Paste authorization code (already have code)', value: 'code' },
-          { title: '⏭️  Skip for now (1k req/day limit)', value: 'skip' },
-          { title: ui.dim('← Go back'), value: 'back' },
+  const wizardConfig = defineWizard({
+    meta: {
+      name: 'eBay MCP',
+      description: 'Server Setup Wizard — powered by grimoire',
+      icon: '🛒',
+      banner: 'eBay MCP',
+    },
+    theme: {
+      tokens: {
+        primary: '#0064D2',
+        success: '#86B817',
+        warning: '#F5AF02',
+        error: '#E53238',
+      },
+    },
+    steps: [
+      {
+        id: 'environment',
+        type: 'select',
+        message: 'Select eBay environment:',
+        description: '🧪 Sandbox for testing  •  🚀 Production for live trading',
+        options: [
+          { value: 'sandbox', label: '🧪 Sandbox  — development & testing (recommended)' },
+          { value: 'production', label: '🚀 Production — live trading' },
         ],
-    initial: 0,
+        default: (existingConfig.EBAY_ENVIRONMENT as 'sandbox' | 'production') || 'sandbox',
+      },
+      {
+        id: 'marketplace',
+        type: 'select',
+        message: 'Default eBay marketplace:',
+        description: 'Used as a default header for API requests — optional',
+        options: [
+          { value: '', label: 'Skip — leave unset' },
+          ...MARKETPLACE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+          { value: '__custom__', label: 'Other — enter manually' },
+        ],
+        default: existingConfig.EBAY_MARKETPLACE_ID || 'EBAY_US',
+      },
+      {
+        id: 'marketplace-custom',
+        type: 'text',
+        message: 'Enter marketplace ID:',
+        description: 'e.g. EBAY_US, EBAY_DE',
+        when: { field: 'marketplace', equals: '__custom__' },
+        default: existingConfig.EBAY_MARKETPLACE_ID || 'EBAY_US',
+        validate: [{ rule: 'required' }],
+      },
+      {
+        id: 'content-language',
+        type: 'select',
+        message: 'Default Content-Language:',
+        description: 'Used as a default header for API requests — optional',
+        options: [
+          { value: '', label: 'Skip — leave unset' },
+          ...CONTENT_LANGUAGE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+          { value: '__custom__', label: 'Other — enter manually' },
+        ],
+        default: existingConfig.EBAY_CONTENT_LANGUAGE || 'en-US',
+      },
+      {
+        id: 'content-language-custom',
+        type: 'text',
+        message: 'Enter Content-Language:',
+        description: 'e.g. en-US, de-DE',
+        when: { field: 'content-language', equals: '__custom__' },
+        default: existingConfig.EBAY_CONTENT_LANGUAGE || 'en-US',
+        validate: [{ rule: 'required' }],
+      },
+      {
+        id: 'client-id',
+        type: 'text',
+        message: 'Client ID (App ID):',
+        description: 'From https://developer.ebay.com/my/keys',
+        default: existingConfig.EBAY_CLIENT_ID || '',
+        validate: [{ rule: 'required' }],
+      },
+      {
+        id: 'client-secret',
+        type: 'password',
+        message: 'Client Secret (Cert ID):',
+        validate: [{ rule: 'required' }],
+      },
+      {
+        id: 'redirect-uri',
+        type: 'text',
+        message: 'Redirect URI (RuName):',
+        description: 'The RuName configured in your eBay developer account',
+        default: existingConfig.EBAY_REDIRECT_URI || '',
+        validate: [{ rule: 'required' }],
+      },
+      {
+        id: 'oauth-method',
+        type: 'select',
+        message: 'Set up OAuth for higher API rate limits:',
+        description: 'App credentials: 1,000 req/day  •  User OAuth: 10,000–50,000 req/day',
+        options: [
+          { value: 'existing', label: '📝 I have a refresh token' },
+          { value: 'manual', label: '🔗 Generate OAuth URL (opens browser)' },
+          { value: 'code', label: '🔑 Paste authorization code (already have code)' },
+          { value: 'skip', label: '⏭️  Skip for now (1,000 req/day limit)' },
+        ],
+      },
+      {
+        id: 'oauth-token',
+        type: 'text',
+        message: 'Paste your refresh token:',
+        description: 'Should start with v^1.1#',
+        default: '',
+      },
+      {
+        id: 'oauth-code',
+        type: 'text',
+        message: 'Paste the callback URL or authorization code:',
+        description: 'Copy the full redirect URL or just the code= parameter',
+        default: '',
+      },
+      ...(availableClients.length > 0
+        ? ([
+            {
+              id: 'mcp-clients',
+              type: 'multiselect' as const,
+              message: 'Configure MCP clients:',
+              description: 'Select AI assistants to connect to the eBay MCP server',
+              required: false,
+              options: availableClients.map((c) => ({
+                value: c.name,
+                label: `${c.displayName}${c.configExists ? '  (update)' : '  (new)'}`,
+              })),
+            },
+          ] as const)
+        : ([
+            {
+              id: 'no-mcp-clients',
+              type: 'note' as const,
+              message: 'No MCP clients detected',
+              description:
+                'Install Claude Desktop, Cline (VSCode), or Continue.dev, then run setup again.',
+            },
+          ] as const)),
+    ],
   });
 
-  if (!tokenChoice.method) return 'cancel';
-  if (tokenChoice.method === 'back') return 'back';
+  const answers = await runWizard(wizardConfig, {
+    renderer: new ClackRenderer(),
 
-  if (tokenChoice.method === 'existing') {
-    const tokenInput = await prompts({
-      type: 'text',
-      name: 'token',
-      message: 'Paste your refresh token:',
-      validate: (v: string) => {
-        const clean = v.trim().replace(/^["']|["']$/g, '');
+    optionsProvider: async (stepId) => {
+      if (stepId === 'oauth-method') {
+        const hasToken = existingConfig.EBAY_USER_REFRESH_TOKEN?.startsWith('v^1.1#');
+        if (hasToken) {
+          return [
+            { value: 'keep', label: '✓  Keep and verify existing token' },
+            { value: 'existing', label: '📝 Replace with a different refresh token' },
+            { value: 'manual', label: '🔗 Generate OAuth URL (opens browser)' },
+            { value: 'code', label: '🔑 Paste authorization code' },
+            { value: 'skip', label: '⏭️  Skip for now' },
+          ];
+        }
+      }
+      return undefined;
+    },
+
+    asyncValidate: async (stepId, value) => {
+      if (stepId === 'oauth-token') {
+        const clean = String(value).trim().replace(/^["']|["']$/g, '');
         if (!clean) return 'Token is required';
         if (!clean.startsWith('v^1.1#')) return 'Token should start with v^1.1#';
-        return true;
-      },
-    });
+      }
+      if (stepId === 'oauth-code') {
+        const code = parseAuthorizationCode(String(value));
+        if (!code)
+          return 'Could not find authorization code. Paste the full redirect URL or the code parameter.';
+      }
+      return null;
+    },
 
-    if (tokenInput.token) {
-      const cleanToken = tokenInput.token.trim().replace(/^["']|["']$/g, '');
-      state.config.EBAY_USER_REFRESH_TOKEN = cleanToken;
+    onAfterStep: async (stepId, value, context) => {
+      const a = context.answers;
+      const environment = (a['environment'] as 'sandbox' | 'production') || 'sandbox';
+      const clientId = a['client-id'] as string;
+      const clientSecret = a['client-secret'] as string;
+      const redirectUri = a['redirect-uri'] as string;
 
-      // Verify the pasted token works
-      console.log('\n  ' + ui.info('Verifying refresh token...'));
-      try {
-        const { accessToken, userInfo } = await verifyRefreshToken(
-          cleanToken,
-          state.config.EBAY_CLIENT_ID,
-          state.config.EBAY_CLIENT_SECRET,
-          state.environment
-        );
-        showSuccess('Refresh token verified successfully!');
-        state.config.EBAY_USER_ACCESS_TOKEN = accessToken;
-        displayUserInfo(userInfo);
+      // ── oauth-method: dispatch to correct sub-flow ─────────────────────────
+      if (stepId === 'oauth-method') {
+        const method = value as string;
 
-        // Get app access token too
-        console.log('  ' + ui.info('Getting app access token...'));
-        try {
-          const appToken = await getAppAccessToken(
-            state.config.EBAY_CLIENT_ID,
-            state.config.EBAY_CLIENT_SECRET,
-            state.environment
-          );
-          state.config.EBAY_APP_ACCESS_TOKEN = appToken;
-          showSuccess('App access token obtained!');
-        } catch {
-          showWarning('Could not get app access token (user tokens will still work).');
-        }
-
-        // Update Claude Desktop config if installed
-        if (isClaudeDesktopInstalled()) {
-          console.log('  ' + ui.info('Updating Claude Desktop configuration...'));
-          const claudeResult = updateClaudeDesktopConfig(state.config, state.environment);
-          if (claudeResult.success) {
-            showSuccess('Claude Desktop config updated with credentials!');
-            showInfo(`Config: ${claudeResult.configPath}`);
-          } else {
-            showWarning(`Could not update Claude Desktop: ${claudeResult.error}`);
+        if (method === 'keep') {
+          const stopSpinner = showSpinner('Verifying existing refresh token...');
+          try {
+            const { accessToken, userInfo } = await verifyRefreshToken(
+              existingConfig.EBAY_USER_REFRESH_TOKEN,
+              clientId, clientSecret, environment,
+            );
+            stopSpinner();
+            showSuccess('Refresh token verified!');
+            tokens.refreshToken = existingConfig.EBAY_USER_REFRESH_TOKEN;
+            tokens.accessToken = accessToken;
+            displayUserInfo(userInfo);
+            try {
+              tokens.appAccessToken = await getAppAccessToken(clientId, clientSecret, environment);
+              showSuccess('App access token obtained.');
+            } catch {
+              showWarning('Could not obtain app access token (user tokens still work).');
+            }
+            if (isClaudeDesktopInstalled()) {
+              const r = updateClaudeDesktopConfig(
+                { ...a as Record<string, string>, EBAY_USER_REFRESH_TOKEN: tokens.refreshToken ?? '' },
+                environment,
+              );
+              if (r.success) { showSuccess('Claude Desktop config updated.'); if (r.details) showInfo(r.details); }
+              else showWarning(`Could not update Claude Desktop: ${r.error}`);
+            }
+          } catch (error) {
+            stopSpinner();
+            const msg = axios.isAxiosError(error)
+              ? error.response?.data?.error_description || error.response?.data?.errors?.[0]?.message || error.message
+              : error instanceof Error ? error.message : 'Unknown error';
+            showError(`Token verification failed: ${msg}`);
+            if (msg.toLowerCase().includes('access denied'))
+              showWarning('Token may be missing required OAuth scopes.');
+            else showWarning('Existing token may be expired or invalid.');
+            showInfo('Continuing with existing token — re-run setup to refresh it.');
+            tokens.refreshToken = existingConfig.EBAY_USER_REFRESH_TOKEN;
           }
+          context.setNextStep(finalStepId);
+
+        } else if (method === 'existing') {
+          context.setNextStep('oauth-token');
+
+        } else if (method === 'manual') {
+          const authUrl = getOAuthAuthorizationUrl(clientId, redirectUri, environment);
+          context.showNote('OAuth Authorization URL', authUrl);
+          await context.openBrowser(authUrl);
+          showInfo('1. Sign in to your eBay account in the browser');
+          showInfo('2. Grant permissions to your app');
+          showInfo('3. Copy the redirect URL or the code parameter, then paste it below');
+          console.log('');
+          context.setNextStep('oauth-code');
+
+        } else if (method === 'code') {
+          context.setNextStep('oauth-code');
+
+        } else if (method === 'skip') {
+          showWarning("Skipping OAuth — you'll be limited to 1,000 requests/day.");
+          context.setNextStep(finalStepId);
         }
-
-        console.log('\n  ' + ui.success('✓') + ' OAuth setup complete!\n');
-        showKeyboardHints(['Enter: Continue to next step']);
-        await prompts({ type: 'text', name: 'continue', message: 'Press Enter to continue...' });
-      } catch (error) {
-        const errorMsg = axios.isAxiosError(error)
-          ? error.response?.data?.error_description ||
-            error.response?.data?.errors?.[0]?.message ||
-            error.message
-          : error instanceof Error
-            ? error.message
-            : 'Unknown error';
-        showError(`Token verification failed: ${errorMsg}`);
-        showWarning('The refresh token may be expired or invalid.');
-        showInfo("Token saved anyway. You may need to generate a new token if it doesn't work.\n");
-        showKeyboardHints(['Enter: Continue to next step']);
-        await prompts({ type: 'text', name: 'continue', message: 'Press Enter to continue...' });
       }
-    }
-  } else if (tokenChoice.method === 'manual') {
-    const authUrl = getOAuthAuthorizationUrl(
-      state.config.EBAY_CLIENT_ID,
-      state.config.EBAY_REDIRECT_URI,
-      state.environment
-    );
 
-    console.log('\n  ' + ui.bold('OAuth Authorization URL:'));
-    console.log(ui.dim('  ' + '─'.repeat(56)));
-    console.log(`  ${ui.info(authUrl)}`);
-    console.log(ui.dim('  ' + '─'.repeat(56)));
-
-    // Automatically open the URL in the browser
-    console.log('\n  ' + ui.info('Opening browser...'));
-    try {
-      await openBrowser(authUrl);
-      showSuccess('Browser opened successfully!');
-    } catch {
-      showWarning('Could not open browser automatically. Please copy the URL above.');
-    }
-
-    console.log('\n  ' + ui.bold('Steps:'));
-    console.log('  1. Sign in to your eBay account in the browser');
-    console.log('  2. Grant permissions to your app');
-    console.log('  3. You will be redirected - copy the URL or code parameter');
-    console.log('  4. Paste it below to complete the setup\n');
-
-    // Ask for the callback URL or code
-    const codeInput = await prompts({
-      type: 'text',
-      name: 'code',
-      message: 'Paste the callback URL or authorization code:',
-      validate: (v: string) => {
-        if (!v.trim()) return 'Please paste the URL or code from the callback';
-        const code = parseAuthorizationCode(v);
-        if (!code)
-          return 'Could not find authorization code. Paste the full URL or the code parameter.';
-        return true;
-      },
-    });
-
-    if (!codeInput.code) {
-      showWarning('OAuth setup cancelled.');
-      return 'continue';
-    }
-
-    const authCode = parseAuthorizationCode(codeInput.code);
-    if (!authCode) {
-      showError('Could not parse authorization code.');
-      return 'continue';
-    }
-
-    // Exchange code for tokens
-    console.log('\n  ' + ui.info('Exchanging authorization code for tokens...'));
-
-    try {
-      const tokens = await exchangeAuthorizationCode(
-        authCode,
-        state.config.EBAY_CLIENT_ID,
-        state.config.EBAY_CLIENT_SECRET,
-        state.config.EBAY_REDIRECT_URI,
-        state.environment
-      );
-
-      showSuccess('Authorization code exchanged successfully!');
-
-      // Store all user tokens in state.config (will be saved to .env by saveConfig)
-      state.config.EBAY_USER_REFRESH_TOKEN = tokens.refreshToken;
-      state.config.EBAY_USER_ACCESS_TOKEN = tokens.accessToken;
-
-      // Verify setup by fetching user info (optional - requires identity scope)
-      console.log('  ' + ui.info('Verifying setup by fetching your eBay account info...'));
-      try {
-        const userInfo = await fetchEbayUserInfo(tokens.accessToken, state.environment);
-        showSuccess('Account verified successfully!');
-        displayUserInfo(userInfo);
-      } catch (userError) {
-        const userErrorMsg = axios.isAxiosError(userError)
-          ? userError.response?.data?.errors?.[0]?.message || userError.message
-          : userError instanceof Error
-            ? userError.message
-            : 'Unknown error';
-        showWarning(`Could not fetch user info: ${userErrorMsg}`);
-        if (userErrorMsg.toLowerCase().includes('access denied')) {
-          showInfo(
-            'This is normal if your RuName does not include the commerce.identity.readonly scope.'
+      // ── oauth-token: verify pasted refresh token ───────────────────────────
+      if (stepId === 'oauth-token') {
+        const rawToken = String(value).trim().replace(/^["']|["']$/g, '');
+        tokens.refreshToken = rawToken;
+        const stopSpinner = showSpinner('Verifying refresh token...');
+        try {
+          const { accessToken, userInfo } = await verifyRefreshToken(
+            rawToken, clientId, clientSecret, environment,
           );
-          showInfo('Your OAuth tokens are valid and all other APIs will work correctly.');
-        } else {
-          showInfo('OAuth tokens were saved successfully. You can still use the MCP server.');
+          stopSpinner();
+          showSuccess('Refresh token verified!');
+          tokens.accessToken = accessToken;
+          displayUserInfo(userInfo);
+          try {
+            tokens.appAccessToken = await getAppAccessToken(clientId, clientSecret, environment);
+            showSuccess('App access token obtained.');
+          } catch {
+            showWarning('Could not obtain app access token (user tokens still work).');
+          }
+          if (isClaudeDesktopInstalled()) {
+            const r = updateClaudeDesktopConfig(
+              { ...a as Record<string, string>, EBAY_USER_REFRESH_TOKEN: rawToken },
+              environment,
+            );
+            if (r.success) { showSuccess('Claude Desktop config updated.'); if (r.details) showInfo(r.details); }
+            else showWarning(`Could not update Claude Desktop: ${r.error}`);
+          }
+        } catch (error) {
+          stopSpinner();
+          const msg = axios.isAxiosError(error)
+            ? error.response?.data?.error_description || error.response?.data?.errors?.[0]?.message || error.message
+            : error instanceof Error ? error.message : 'Unknown error';
+          showError(`Token verification failed: ${msg}`);
+          showWarning("Token saved anyway — you may need to re-authenticate if it doesn't work.");
         }
+        context.setNextStep(finalStepId);
       }
 
-      // Also get app access token for client credentials flow
-      console.log('  ' + ui.info('Getting app access token...'));
-      try {
-        const appToken = await getAppAccessToken(
-          state.config.EBAY_CLIENT_ID,
-          state.config.EBAY_CLIENT_SECRET,
-          state.environment
-        );
-        state.config.EBAY_APP_ACCESS_TOKEN = appToken;
-        showSuccess('App access token obtained!');
-      } catch {
-        showWarning('Could not get app access token (user tokens will still work).');
-      }
-
-      // Update Claude Desktop config if installed
-      if (isClaudeDesktopInstalled()) {
-        console.log('  ' + ui.info('Updating Claude Desktop configuration...'));
-        const claudeResult = updateClaudeDesktopConfig(state.config, state.environment);
-        if (claudeResult.success) {
-          showSuccess('Claude Desktop config updated with credentials!');
-          showInfo(`Config: ${claudeResult.configPath}`);
-        } else {
-          showWarning(`Could not update Claude Desktop: ${claudeResult.error}`);
-        }
-      }
-
-      console.log('\n  ' + ui.success('✓') + ' OAuth setup complete!');
-      console.log(
-        `  ${ui.dim('Access token expires in:')} ${Math.floor(tokens.expiresIn / 60)} minutes`
-      );
-      console.log(
-        `  ${ui.dim('Refresh token expires in:')} ${Math.floor(tokens.refreshTokenExpiresIn / 60 / 60 / 24)} days`
-      );
-      console.log(`  ${ui.dim('All tokens will be saved to .env')}\n`);
-      showKeyboardHints(['Enter: Continue to next step']);
-      await prompts({ type: 'text', name: 'continue', message: 'Press Enter to continue...' });
-    } catch (error) {
-      const errorMsg = axios.isAxiosError(error)
-        ? error.response?.data?.error_description || error.message
-        : error instanceof Error
-          ? error.message
-          : 'Unknown error';
-      showError(`Failed to exchange code: ${errorMsg}`);
-      console.log('\n  ' + ui.dim('Common issues:'));
-      console.log('  • Authorization code expired (codes are valid for ~5 minutes)');
-      console.log('  • Code was already used (each code can only be used once)');
-      console.log('  • Redirect URI mismatch (must match exactly what is configured in eBay)\n');
-
-      showKeyboardHints(['Enter: Continue']);
-      await prompts({ type: 'text', name: 'continue', message: 'Press Enter to continue...' });
-    }
-  } else if (tokenChoice.method === 'code') {
-    // Direct code paste - user already has an authorization code
-    console.log('\n  ' + ui.bold('Paste Authorization Code'));
-    console.log(
-      ui.dim(
-        '  If you already completed OAuth in a browser and have the code from the callback URL.\n'
-      )
-    );
-
-    const codeInput = await prompts({
-      type: 'text',
-      name: 'code',
-      message: 'Paste the callback URL or authorization code:',
-      validate: (v: string) => {
-        if (!v.trim()) return 'Please paste the URL or code from the callback';
-        const code = parseAuthorizationCode(v);
-        if (!code)
-          return 'Could not find authorization code. Paste the full URL or the code parameter.';
-        return true;
-      },
-    });
-
-    if (!codeInput.code) {
-      showWarning('OAuth setup cancelled.');
-      return 'continue';
-    }
-
-    const authCode = parseAuthorizationCode(codeInput.code);
-    if (!authCode) {
-      showError('Could not parse authorization code.');
-      return 'continue';
-    }
-
-    // Exchange code for tokens
-    console.log('\n  ' + ui.info('Exchanging authorization code for tokens...'));
-
-    try {
-      const tokens = await exchangeAuthorizationCode(
-        authCode,
-        state.config.EBAY_CLIENT_ID,
-        state.config.EBAY_CLIENT_SECRET,
-        state.config.EBAY_REDIRECT_URI,
-        state.environment
-      );
-
-      showSuccess('Authorization code exchanged successfully!');
-
-      // Store all user tokens in state.config (will be saved to .env by saveConfig)
-      state.config.EBAY_USER_REFRESH_TOKEN = tokens.refreshToken;
-      state.config.EBAY_USER_ACCESS_TOKEN = tokens.accessToken;
-
-      // Verify setup by fetching user info (optional - requires identity scope)
-      console.log('  ' + ui.info('Verifying setup by fetching your eBay account info...'));
-      try {
-        const userInfo = await fetchEbayUserInfo(tokens.accessToken, state.environment);
-        showSuccess('Account verified successfully!');
-        displayUserInfo(userInfo);
-      } catch (userError) {
-        const userErrorMsg = axios.isAxiosError(userError)
-          ? userError.response?.data?.errors?.[0]?.message || userError.message
-          : userError instanceof Error
-            ? userError.message
-            : 'Unknown error';
-        showWarning(`Could not fetch user info: ${userErrorMsg}`);
-        if (userErrorMsg.toLowerCase().includes('access denied')) {
-          showInfo(
-            'This is normal if your RuName does not include the commerce.identity.readonly scope.'
+      // ── oauth-code: exchange authorization code for tokens ─────────────────
+      if (stepId === 'oauth-code') {
+        const authCode = parseAuthorizationCode(String(value));
+        if (!authCode) return;
+        const stopSpinner = showSpinner('Exchanging authorization code for tokens...');
+        try {
+          const result = await exchangeAuthorizationCode(
+            authCode, clientId, clientSecret, redirectUri, environment,
           );
-          showInfo('Your OAuth tokens are valid and all other APIs will work correctly.');
-        } else {
-          showInfo('OAuth tokens were saved successfully. You can still use the MCP server.');
+          stopSpinner();
+          showSuccess('Authorization code exchanged successfully!');
+          tokens.refreshToken = result.refreshToken;
+          tokens.accessToken = result.accessToken;
+          try {
+            const userInfo = await fetchEbayUserInfo(result.accessToken, environment);
+            showSuccess('Account verified!');
+            displayUserInfo(userInfo);
+          } catch (userError) {
+            const userMsg = axios.isAxiosError(userError)
+              ? userError.response?.data?.errors?.[0]?.message || userError.message
+              : userError instanceof Error ? userError.message : 'Unknown';
+            showWarning(`Could not fetch account info: ${userMsg}`);
+            if (userMsg.toLowerCase().includes('access denied'))
+              showInfo('Normal if RuName lacks commerce.identity.readonly scope — tokens are valid.');
+          }
+          try {
+            tokens.appAccessToken = await getAppAccessToken(clientId, clientSecret, environment);
+            showSuccess('App access token obtained.');
+          } catch {
+            showWarning('Could not obtain app access token (user tokens still work).');
+          }
+          showInfo(`Access token expires in: ${Math.floor(result.expiresIn / 60)} minutes`);
+          showInfo(`Refresh token expires in: ${Math.floor(result.refreshTokenExpiresIn / 60 / 60 / 24)} days`);
+          if (isClaudeDesktopInstalled()) {
+            const r = updateClaudeDesktopConfig(
+              {
+                ...a as Record<string, string>,
+                EBAY_USER_REFRESH_TOKEN: tokens.refreshToken ?? '',
+                EBAY_USER_ACCESS_TOKEN: tokens.accessToken ?? '',
+              },
+              environment,
+            );
+            if (r.success) { showSuccess('Claude Desktop config updated.'); if (r.details) showInfo(r.details); }
+            else showWarning(`Could not update Claude Desktop: ${r.error}`);
+          }
+        } catch (error) {
+          stopSpinner();
+          const msg = axios.isAxiosError(error)
+            ? error.response?.data?.error_description || error.message
+            : error instanceof Error ? error.message : 'Unknown error';
+          showError(`Failed to exchange code: ${msg}`);
+          console.log('  Common issues:');
+          console.log('  • Authorization code expired (codes are valid for ~5 minutes)');
+          console.log('  • Code was already used (each code can only be used once)');
+          console.log('  • Redirect URI mismatch\n');
+        }
+        context.setNextStep(finalStepId);
+      }
+
+      // ── mcp-clients: configure selected clients ────────────────────────────
+      if (stepId === 'mcp-clients') {
+        const selectedNames = value as string[];
+        for (const name of selectedNames) {
+          const client = detectedClients.find((c) => c.name === name);
+          if (!client) continue;
+          const stopSpinner = showSpinner(`Configuring ${client.displayName}...`);
+          await new Promise((r) => setTimeout(r, 400));
+          const success = configureLLMClient(client, PROJECT_ROOT);
+          stopSpinner();
+          if (success) showSuccess(`Configured ${client.displayName}`);
+          else showError(`Failed to configure ${client.displayName}`);
         }
       }
+    },
 
-      // Also get app access token for client credentials flow
-      console.log('  ' + ui.info('Getting app access token...'));
-      try {
-        const appToken = await getAppAccessToken(
-          state.config.EBAY_CLIENT_ID,
-          state.config.EBAY_CLIENT_SECRET,
-          state.environment
-        );
-        state.config.EBAY_APP_ACCESS_TOKEN = appToken;
-        showSuccess('App access token obtained!');
-      } catch {
-        showWarning('Could not get app access token (user tokens will still work).');
-      }
-
-      // Update Claude Desktop config if installed
-      if (isClaudeDesktopInstalled()) {
-        console.log('  ' + ui.info('Updating Claude Desktop configuration...'));
-        const claudeResult = updateClaudeDesktopConfig(state.config, state.environment);
-        if (claudeResult.success) {
-          showSuccess('Claude Desktop config updated with credentials!');
-          showInfo(`Config: ${claudeResult.configPath}`);
-        } else {
-          showWarning(`Could not update Claude Desktop: ${claudeResult.error}`);
-        }
-      }
-
-      console.log('\n  ' + ui.success('✓') + ' OAuth setup complete!');
-      console.log(
-        `  ${ui.dim('Access token expires in:')} ${Math.floor(tokens.expiresIn / 60)} minutes`
-      );
-      console.log(
-        `  ${ui.dim('Refresh token expires in:')} ${Math.floor(tokens.refreshTokenExpiresIn / 60 / 60 / 24)} days`
-      );
-      console.log(`  ${ui.dim('All tokens will be saved to .env')}\n`);
-      showKeyboardHints(['Enter: Continue to next step']);
-      await prompts({ type: 'text', name: 'continue', message: 'Press Enter to continue...' });
-    } catch (error) {
-      const errorMsg = axios.isAxiosError(error)
-        ? error.response?.data?.error_description || error.message
-        : error instanceof Error
-          ? error.message
-          : 'Unknown error';
-      showError(`Failed to exchange code: ${errorMsg}`);
-      console.log('\n  ' + ui.dim('Common issues:'));
-      console.log('  • Authorization code expired (codes are valid for ~5 minutes)');
-      console.log('  • Code was already used (each code can only be used once)');
-      console.log('  • Redirect URI mismatch (must match exactly what is configured in eBay)\n');
-
-      showKeyboardHints(['Enter: Continue']);
-      await prompts({ type: 'text', name: 'continue', message: 'Press Enter to continue...' });
-    }
-  } else if (tokenChoice.method === 'skip') {
-    showWarning("Skipping OAuth. You'll be limited to 1,000 requests/day.");
-  }
-
-  return 'continue';
-}
-
-/**
- * Configure MCP clients with the generated environment variables.
- */
-async function stepMCPClients(state: SetupState): Promise<StepResult> {
-  clearScreen();
-  showLogo();
-  showProgress(5, 'MCP Client Setup');
-
-  console.log('  Configure your AI assistant to use the eBay MCP server:\n');
-
-  state.detectedClients = detectLLMClients();
-  const detected = state.detectedClients.filter((c) => c.detected);
-
-  if (detected.length === 0) {
-    showWarning('No supported MCP clients detected.\n');
-    console.log('  Supported clients:');
-    console.log('    • Claude Desktop (Anthropic)');
-    console.log('    • Cline (VSCode extension)');
-    console.log('    • Continue.dev (VSCode/JetBrains)\n');
-
-    showInfo('Install one of these clients and run setup again.');
-
-    const navChoice = await prompts({
-      type: 'select',
-      name: 'action',
-      message: 'What would you like to do?',
-      choices: [
-        { title: '→ Continue to finish setup', value: 'continue' },
-        { title: ui.dim('← Go back'), value: 'back' },
-      ],
-      initial: 0,
-    });
-
-    if (!navChoice.action) return 'cancel';
-    if (navChoice.action === 'back') return 'back';
-    return 'continue';
-  }
-
-  showBox(
-    'Detected MCP Clients',
-    detected.map((c) => {
-      const status = c.configExists
-        ? `${c.displayName} [Already configured]`
-        : `${c.displayName} [Not configured]`;
-      return status;
-    })
-  );
-
-  // First ask if they want to configure or go back
-  const navChoice = await prompts({
-    type: 'select',
-    name: 'action',
-    message: 'What would you like to do?',
-    choices: [
-      { title: '⚙️  Configure MCP clients', value: 'configure' },
-      { title: '⏭️  Skip client configuration', value: 'skip' },
-      { title: ui.dim('← Go back'), value: 'back' },
-    ],
-    initial: 0,
+    onCancel: () => {
+      console.log(ui.warning('\n  Setup cancelled.\n'));
+      process.exit(0);
+    },
   });
 
-  if (!navChoice.action) return 'cancel';
-  if (navChoice.action === 'back') return 'back';
-  if (navChoice.action === 'skip') {
-    showInfo('Skipping client configuration.');
-    return 'continue';
-  }
+  // ── Persist final .env ─────────────────────────────────────────────────────
 
-  const clientChoice = await prompts({
-    type: 'multiselect',
-    name: 'clients',
-    message: 'Select clients to configure:',
-    choices: detected.map((c) => ({
-      title: c.displayName + (c.configExists ? chalk.yellow(' [Update]') : chalk.green(' [New]')),
-      value: c.name,
-      selected: !c.configExists,
-    })),
-    hint: 'Space: Toggle  Enter: Confirm',
-    instructions: false,
-  });
+  const marketplaceId =
+    answers['marketplace'] === '__custom__'
+      ? (answers['marketplace-custom'] as string)
+      : (answers['marketplace'] as string);
 
-  if (!clientChoice.clients || clientChoice.clients.length === 0) {
-    showInfo('Skipping client configuration.');
-    return 'continue';
-  }
+  const contentLanguage =
+    answers['content-language'] === '__custom__'
+      ? (answers['content-language-custom'] as string)
+      : (answers['content-language'] as string);
 
-  console.log('');
-  for (const clientName of clientChoice.clients) {
-    const client = detected.find((c) => c.name === clientName);
-    if (!client) continue;
+  const environment = answers['environment'] as string;
 
-    const stopSpinner = showSpinner(`Configuring ${client.displayName}...`);
-    await new Promise((r) => setTimeout(r, 500));
-    const success = configureLLMClient(client, PROJECT_ROOT);
-    stopSpinner();
+  const finalConfig: Record<string, string> = {
+    EBAY_CLIENT_ID: answers['client-id'] as string,
+    EBAY_CLIENT_SECRET: answers['client-secret'] as string,
+    EBAY_REDIRECT_URI: answers['redirect-uri'] as string,
+    EBAY_ENVIRONMENT: environment,
+    ...(marketplaceId ? { EBAY_MARKETPLACE_ID: marketplaceId } : {}),
+    ...(contentLanguage ? { EBAY_CONTENT_LANGUAGE: contentLanguage } : {}),
+    ...(tokens.refreshToken
+      ? { EBAY_USER_REFRESH_TOKEN: tokens.refreshToken }
+      : existingConfig.EBAY_USER_REFRESH_TOKEN
+        ? { EBAY_USER_REFRESH_TOKEN: existingConfig.EBAY_USER_REFRESH_TOKEN }
+        : {}),
+    ...(tokens.accessToken ? { EBAY_USER_ACCESS_TOKEN: tokens.accessToken } : {}),
+    ...(tokens.appAccessToken ? { EBAY_APP_ACCESS_TOKEN: tokens.appAccessToken } : {}),
+  };
 
-    if (success) {
-      showSuccess(`Configured ${client.displayName}`);
-    } else {
-      showError(`Failed to configure ${client.displayName}`);
-    }
-  }
-
-  return 'continue';
-}
-
-/**
- * Finalize setup and display summary information.
- */
-async function stepComplete(state: SetupState): Promise<void> {
-  clearScreen();
-  showLogo();
-  showProgress(6, 'Setup Complete');
-
-  const stopSpinner = showSpinner('Saving configuration...');
+  const stopSave = showSpinner('Saving configuration...');
   await new Promise((r) => setTimeout(r, 300));
-  saveConfig(state.config, state.environment);
-  stopSpinner();
-  showSuccess('Configuration saved to .env\n');
+  saveConfig(finalConfig, environment);
+  stopSave();
 
   console.log(ui.bold.green('\n  🎉 Setup Complete!\n'));
-
-  showBox('Configuration Summary', [
-    `Environment:     ${state.environment}`,
-    `Marketplace ID:  ${state.config.EBAY_MARKETPLACE_ID || 'Not set'}`,
-    `Content-Lang:    ${state.config.EBAY_CONTENT_LANGUAGE || 'Not set'}`,
-    `Client ID:       ${state.config.EBAY_CLIENT_ID?.slice(0, 20)}...`,
-    `Redirect URI:    ${state.config.EBAY_REDIRECT_URI?.slice(0, 30)}...`,
-    `OAuth Token:     ${state.config.EBAY_USER_REFRESH_TOKEN ? '✓ Configured' : '✗ Not set'}`,
-    `Rate Limit:      ${state.config.EBAY_USER_REFRESH_TOKEN ? '10k-50k/day' : '1k/day'}`,
-  ]);
-
-  console.log(ui.bold.cyan('\n  📋 Quick Reference\n'));
-  console.log('  ' + ui.dim('─'.repeat(56)));
-  console.log(`  ${ui.bold('Start MCP Server:')}     ${ui.info('npm start')}`);
-  console.log(`  ${ui.bold('Run Diagnostics:')}      ${ui.info('npm run diagnose')}`);
-  console.log(`  ${ui.bold('View Logs:')}            ${ui.info('npm run dev')}`);
-  console.log(`  ${ui.bold('Run Tests:')}            ${ui.info('npm test')}`);
-  console.log('  ' + ui.dim('─'.repeat(56)));
-
-  console.log(ui.bold.cyan('\n  🚀 Next Steps\n'));
-  console.log('  1. Restart your MCP client (Claude Desktop, etc.)');
-  console.log('  2. The eBay server should appear in available tools');
-  console.log('  3. Try: "Show my eBay seller information"\n');
-
-  console.log(ui.dim('  Documentation: ') + ui.info('https://github.com/YosefHayim/ebay-mcp'));
+  console.log(`  ${ui.dim('Environment:')}    ${environment}`);
+  console.log(`  ${ui.dim('Client ID:')}      ${(finalConfig.EBAY_CLIENT_ID || '').slice(0, 20)}...`);
   console.log(
-    ui.dim('  Get Help:      ') + ui.info('https://github.com/YosefHayim/ebay-mcp/issues\n')
+    `  ${ui.dim('OAuth Token:')}    ${finalConfig.EBAY_USER_REFRESH_TOKEN ? ui.success('✓ configured') : ui.warning('✗ not set')}`,
   );
+  console.log(
+    `  ${ui.dim('Rate Limit:')}     ${finalConfig.EBAY_USER_REFRESH_TOKEN ? '10,000–50,000 req/day' : '1,000 req/day'}`,
+  );
+  console.log('');
+  console.log(`  ${ui.bold('Start server:')}   ${ui.info('npm start')}`);
+  console.log(`  ${ui.bold('Diagnostics:')}    ${ui.info('npm run diagnose')}`);
+  console.log(`  ${ui.bold('Run tests:')}      ${ui.info('npm test')}`);
+  console.log('');
+  console.log(`  ${ui.dim('Restart your MCP client to apply changes.')}\n`);
 }
+
+// ─── Entry point ──────────────────────────────────────────────────────────────
 
 function parseArgs(): { help: boolean; quick: boolean; diagnose: boolean } {
   const args = process.argv.slice(2);
@@ -1761,14 +907,14 @@ function parseArgs(): { help: boolean; quick: boolean; diagnose: boolean } {
 
 function showHelp(): void {
   console.log(`
-${chalk.bold('eBay MCP Server Setup')}
+${chalk.bold('eBay MCP Server Setup')}  ${chalk.dim('powered by grimoire-wizard')}
 
 ${chalk.bold('Usage:')}
   npm run setup [options]
 
 ${chalk.bold('Options:')}
   --help, -h       Show this help message
-  --quick, -q      Quick setup (skip optional steps)
+  --quick, -q      Quick setup (skip optional configuration)
   --diagnose, -d   Run diagnostics only
 
 ${chalk.bold('Examples:')}
@@ -1790,53 +936,16 @@ async function main(): Promise<void> {
     const { runSecurityChecks, displaySecurityResults } =
       await import('../utils/security-checker.js');
     const { validateSetup, displayRecommendations } = await import('../utils/setup-validator.js');
-
-    clearScreen();
-    showLogo();
+    console.clear();
     console.log(ui.bold.cyan('  Running Diagnostics...\n'));
-
     const securityResults = await runSecurityChecks(PROJECT_ROOT);
     displaySecurityResults(securityResults);
-
     const summary = await validateSetup(PROJECT_ROOT);
     displayRecommendations(summary);
-
     process.exit(0);
   }
 
-  const existingConfig = loadExistingConfig();
-  const state: SetupState = {
-    currentStep: 0,
-    config: existingConfig,
-    detectedClients: [],
-    environment: (existingConfig.EBAY_ENVIRONMENT as 'sandbox' | 'production') || 'sandbox',
-    hasExistingConfig: Object.keys(existingConfig).length > 0,
-    isQuickMode: args.quick,
-  };
-
-  const steps = [
-    stepWelcome,
-    stepEnvironment,
-    stepMarketplaceSettings,
-    stepCredentials,
-    stepOAuth,
-    stepMCPClients,
-  ];
-
-  let stepIndex = 0;
-  while (stepIndex < steps.length) {
-    const result = await steps[stepIndex](state);
-    if (result === 'cancel') {
-      console.log(ui.warning('\n  Setup cancelled.\n'));
-      process.exit(0);
-    } else if (result === 'back' && stepIndex > 0) {
-      stepIndex--;
-    } else {
-      stepIndex++;
-    }
-  }
-
-  await stepComplete(state);
+  await runSetup();
 }
 
 process.on('SIGINT', () => {
@@ -1844,14 +953,10 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-export async function runSetup(): Promise<void> {
-  await main();
-}
-
 const entryPath = process.argv[1] ? resolve(process.argv[1]) : undefined;
 const modulePath = resolve(fileURLToPath(import.meta.url));
 if (entryPath && modulePath === entryPath) {
-  runSetup().catch((error) => {
+  main().catch((error) => {
     console.error(ui.error('\n  Setup failed:'), error);
     process.exit(1);
   });
