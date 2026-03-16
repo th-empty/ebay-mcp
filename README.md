@@ -158,6 +158,7 @@ npm run setup
 ```
 
 The wizard will:
+
 - Configure your eBay credentials
 - Set up OAuth authentication (for higher rate limits)
 - Auto-detect and configure your MCP client (Claude Desktop, etc.)
@@ -241,17 +242,17 @@ For detailed OAuth setup and comprehensive configuration guide, see the [Configu
 
 This server supports **9 AI clients** with auto-configuration via `npm run setup`:
 
-| Client | Platform | Config Path | Status |
-|--------|----------|-------------|--------|
-| **Claude Desktop** | macOS, Windows, Linux | `~/Library/Application Support/Claude/claude_desktop_config.json` | ✅ Auto-configured |
-| **Cursor IDE** | macOS, Windows, Linux | `~/.cursor/mcp.json` | ✅ Auto-configured |
-| **Zed Editor** | macOS, Windows, Linux | `~/.config/zed/settings.json` | ✅ Auto-configured |
-| **Cline** | VSCode Extension | `~/...globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | ✅ Auto-configured |
-| **Continue.dev** | VSCode, JetBrains | `~/.continue/config.json` | ✅ Auto-configured |
-| **Windsurf (Codeium)** | macOS, Windows, Linux | `~/.codeium/windsurf/mcp_config.json` | ✅ Auto-configured |
-| **Roo Code** | VSCode Extension | `~/...globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json` | ✅ Auto-configured |
-| **Claude Code CLI** | Terminal | `~/.claude.json` | ✅ Auto-configured |
-| **Amazon Q Developer** | AWS | `~/.aws/amazonq/mcp.json` | ✅ Auto-configured |
+| Client                 | Platform              | Config Path                                                                  | Status             |
+| ---------------------- | --------------------- | ---------------------------------------------------------------------------- | ------------------ |
+| **Claude Desktop**     | macOS, Windows, Linux | `~/Library/Application Support/Claude/claude_desktop_config.json`            | ✅ Auto-configured |
+| **Cursor IDE**         | macOS, Windows, Linux | `~/.cursor/mcp.json`                                                         | ✅ Auto-configured |
+| **Zed Editor**         | macOS, Windows, Linux | `~/.config/zed/settings.json`                                                | ✅ Auto-configured |
+| **Cline**              | VSCode Extension      | `~/...globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | ✅ Auto-configured |
+| **Continue.dev**       | VSCode, JetBrains     | `~/.continue/config.json`                                                    | ✅ Auto-configured |
+| **Windsurf (Codeium)** | macOS, Windows, Linux | `~/.codeium/windsurf/mcp_config.json`                                        | ✅ Auto-configured |
+| **Roo Code**           | VSCode Extension      | `~/...globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`   | ✅ Auto-configured |
+| **Claude Code CLI**    | Terminal              | `~/.claude.json`                                                             | ✅ Auto-configured |
+| **Amazon Q Developer** | AWS                   | `~/.aws/amazonq/mcp.json`                                                    | ✅ Auto-configured |
 
 **Configuration Requirements:**
 
@@ -504,6 +505,7 @@ EBAY_ENABLE_FILE_LOGGING=true
 ```
 
 Log files are stored in `~/.ebay-mcp/logs/`:
+
 - `error.log` - Error-level messages only
 - `combined.log` - All log messages
 - `debug.log` - Debug and verbose messages
@@ -635,11 +637,18 @@ Check current eBay API health, incidents, and fixes:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Contributors
+
+Thanks to all the amazing contributors who have helped make this project better! 🎉
+
+<a href="https://github.com/YosefHayim/ebay-mcp/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=YosefHayim/ebay-mcp" alt="Contributors" />
+</a>
+
 ## Acknowledgments
 
 - [eBay Developers Program](https://developer.ebay.com/) for API access
 - [Model Context Protocol](https://modelcontextprotocol.io/) for the MCP specification
-- All [contributors](https://github.com/YosefHayim/ebay-mcp/graphs/contributors) who have helped improve this project
 
 ---
 
