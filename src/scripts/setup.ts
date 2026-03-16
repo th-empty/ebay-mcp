@@ -448,16 +448,8 @@ function showBox(title: string, content: string[]): void {
 }
 
 function showSpinner(message: string): () => void {
-  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  let i = 0;
-  process.stdout.write(`  ${frames[0]}  ${message}`);
-  const interval = setInterval(() => {
-    process.stdout.write(`\r  ${frames[i++ % frames.length]}  ${message}`);
-  }, 80);
-  return () => {
-    clearInterval(interval);
-    process.stdout.write('\r' + ' '.repeat(message.length + 6) + '\r');
-  };
+  console.log(`  ⠋  ${message}...`);
+  return () => {};
 }
 
 function displayUserInfo(userInfo: EbayUserInfo): void {
@@ -701,9 +693,9 @@ export async function runSetup(): Promise<void> {
     onAfterStep: async (stepId, value, context) => {
       const a = context.answers;
       const environment = (a['environment'] as 'sandbox' | 'production') || 'sandbox';
-      const clientId = a['client-id'] as string;
-      const clientSecret = a['client-secret'] as string;
-      const redirectUri = a['redirect-uri'] as string;
+      const clientId = (a['client-id'] as string) || existingConfig.EBAY_CLIENT_ID || '';
+      const clientSecret = (a['client-secret'] as string) || existingConfig.EBAY_CLIENT_SECRET || '';
+      const redirectUri = (a['redirect-uri'] as string) || existingConfig.EBAY_REDIRECT_URI || '';
 
       if (stepId === 'environment' && args.quick) {
         showInfo('Quick setup enabled — skipping optional marketplace configuration.');
