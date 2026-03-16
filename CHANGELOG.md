@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.6] - 2026-03-16
+
+### Changed
+
+- **Dependencies** — Reverted `zod` to `^3.25.76` (v4 incompatible with `zod-to-json-schema`) and `eslint`/`@eslint/js` to `^9.39.1` (v10 requires Node >=20.19.0)
+- **Dependencies** — Bumped `@modelcontextprotocol/sdk`, `axios`, `dotenv`, `jose`, `@types/node`, `@types/supertest`, `@vitest/coverage-v8`, `prettier`, `typescript-eslint`, `nock`, `openapi-typescript`, `eslint-plugin-n`
+- **CI** — Bumped `actions/checkout` v4→v6, `actions/upload-artifact` v4→v7, `actions/github-script` v7→v8
+- **Lockfiles** — Regenerated both `pnpm-lock.yaml` and `package-lock.json` after merge
+
+## [1.7.5] - 2026-03-15
+
+### Fixed
+
+- **Publish workflow** — Restrict npm publish to tag pushes only
+- **Publish workflow** — Use OIDC provenance for npm trusted publishing
+- **Publish workflow** — Install `npm@latest` for OIDC trusted publishing support
+- **CI** — Add missing `typecheck` script to `package.json`
+- **CI** — Commit `pnpm-lock.yaml` and standardize all workflows on pnpm
+
+### Changed
+
+- **CI** — Auto-bump release workflow using conventional commits
+- **CI** — Run unit tests on every PR and push to main
+- **CI** — Fix Dependabot auto-merge by switching to `pull_request_target`
+- **CI** — Change eBay API sync and status checks to run every ~3 weeks
+- **Docs** — Add contributors welcome badge to README
+
+## [1.7.4] - 2026-03-05
+
+### Fixed
+
+- **npm Package** — Include scope JSON files in npm package tarball (previously missing from published bundle)
+- **Config Loading** — Load `.env` from package root instead of `process.cwd()` to fix env resolution when run from other directories
+
+## [1.7.3] - 2026-02-28
+
+### Added
+
+- **Trading API** — Full listing management support (6 tools)
+  - `ebay_get_item` — Retrieve single listing by item ID
+  - `ebay_get_my_ebay_selling` — Get active/sold/unsold listings summary
+  - `ebay_add_fixed_price_item` — Create fixed-price listing
+  - `ebay_revise_fixed_price_item` — Update existing listing
+  - `ebay_end_fixed_price_item` — End listing early
+  - `ebay_relist_fixed_price_item` — Relist ended item
+- **CI** — Dependabot auto-merge workflow for dependency PRs
+
+### Fixed
+
+- **XML Parsing** — Wrap XML parse errors with context; log `Ack=Warning` responses
+- **Token Values** — Quote token values in `.env` to prevent `#` truncation
+- **Security** — Hardened environment variable handling
+
+### Changed
+
+- **Dependencies** — Added `dotenv-stringify`; bumped `@modelcontextprotocol/sdk`, `fast-xml-parser`, `axios`, `qs`
+- **CI** — Change API status sync schedule from daily to weekly
+
 ## [1.7.2] - 2026-02-07
 
 ### Added
