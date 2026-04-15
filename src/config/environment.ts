@@ -293,7 +293,7 @@ export function getAuthUrl(
 
   const authBase = env === 'production' ? 'https://auth.ebay.com' : 'https://auth.sandbox.ebay.com';
 
-  const scopeList = scopes?.join('%20') || scope.join('%20');
+  const scopeList = (scopes || scope).map(encodeURIComponent).join('%20');
 
   const authorizeParams = new URLSearchParams({
     client_id: clientId,
@@ -327,16 +327,18 @@ export function getOAuthAuthorizationUrl(
 
   let scopeList: string;
   if (scopes && scopes.length > 0) {
-    scopeList = scopes.join('%20');
+    scopeList = scopes.map(encodeURIComponent).join('%20');
   } else {
     const defaultScopes = getDefaultScopes(environment);
-    scopeList = defaultScopes.join('%20');
+    scopeList = defaultScopes.map(encodeURIComponent).join('%20');
   }
 
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
+    prompt: 'login',
+    ...(locale ? { locale } : {}),
     ...(state ? { state } : {}),
   });
 
