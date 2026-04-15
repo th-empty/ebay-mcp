@@ -253,20 +253,18 @@ export function getAuthUrl(environment: 'production' | 'sandbox'): string;
  */
 export function getAuthUrl(
   clientId: string,
+  prompt: 'login' | 'consent',
   redirectUri: string | undefined,
   environment: 'production' | 'sandbox',
-  locale?: LocaleEnum,
-  prompt?: 'login' | 'consent',
   responseType?: 'code',
   state?: string,
   scopes?: string[]
 ): string;
 export function getAuthUrl(
   clientIdOrEnvironment: string,
+  prompt: 'login' | 'consent' = 'login',
   redirectUri?: string,
   environment?: 'production' | 'sandbox',
-  locale: LocaleEnum = LocaleEnum.en_US,
-  prompt: 'login' | 'consent' = 'login',
   responseType: 'code' = 'code',
   state?: string,
   scopes?: string[]
@@ -293,14 +291,13 @@ export function getAuthUrl(
 
   const authBase = env === 'production' ? 'https://auth.ebay.com' : 'https://auth.sandbox.ebay.com';
 
-  const scopeList = (scopes || scope).join('+');
+  const scopeList = encodeURIComponent((scopes || scope).join(' '));
 
   const authorizeParams = new URLSearchParams({
     client_id: clientId,
+    prompt,
     redirect_uri: redirectUri,
     response_type: responseType,
-    prompt,
-    locale,
     ...(state ? { state } : {}),
   });
 
@@ -319,7 +316,6 @@ export function getOAuthAuthorizationUrl(
   redirectUri: string, // MUST be eBay RuName, NOT a URL
   environment: 'production' | 'sandbox',
   scopes?: string[],
-  locale?: string,
   state?: string
 ): string {
   const authBase =
@@ -327,18 +323,17 @@ export function getOAuthAuthorizationUrl(
 
   let scopeList: string;
   if (scopes && scopes.length > 0) {
-    scopeList = scopes.join('+');
+    scopeList = encodeURIComponent(scopes.join(' '));
   } else {
     const defaultScopes = getDefaultScopes(environment);
-    scopeList = defaultScopes.join('+');
+    scopeList = encodeURIComponent(defaultScopes.join(' '));
   }
 
   const params = new URLSearchParams({
     client_id: clientId,
+    prompt: 'login',
     redirect_uri: redirectUri,
     response_type: 'code',
-    prompt: 'login',
-    ...(locale ? { locale } : {}),
     ...(state ? { state } : {}),
   });
 
