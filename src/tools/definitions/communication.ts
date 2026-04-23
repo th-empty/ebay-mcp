@@ -41,9 +41,18 @@ export const communicationTools: ToolDefinition[] = [
     name: 'ebay_search_messages',
     description: 'Search for buyer-seller messages',
     inputSchema: {
-      filter: z.string().optional().describe('Filter criteria for messages'),
-      limit: z.number().optional().describe('Number of messages to return'),
-      offset: z.number().optional().describe('Number of messages to skip'),
+      conversation_type: z
+        .string()
+        .describe('Type of conversation: FROM_MEMBERS (buyer messages) or FROM_EBAY (eBay system messages). Required by eBay API.'),
+      conversation_status: z
+        .string()
+        .optional()
+        .describe('Filter by status: ACTIVE, ARCHIVE, DELETE, READ, UNREAD'),
+      limit: z.string().optional().describe('Number of messages to return (25-50)'),
+      offset: z.string().optional().describe('Number of messages to skip'),
+      other_party_username: z.string().optional().describe('Filter by specific eBay username'),
+      start_time: z.string().optional().describe('Start time filter (ISO 8601 format)'),
+      end_time: z.string().optional().describe('End time filter (ISO 8601 format)'),
     },
   },
   {
@@ -322,9 +331,18 @@ export const communicationTools: ToolDefinition[] = [
     name: 'ebay_get_conversations',
     description: 'Get all buyer-seller conversations (paginated)',
     inputSchema: {
-      filter: z.string().optional().describe('Filter criteria for conversations'),
-      limit: z.number().optional().describe('Number of conversations to return'),
-      offset: z.number().optional().describe('Number of conversations to skip'),
+      conversation_type: z
+        .string()
+        .describe('Type of conversation: FROM_MEMBERS (buyer messages) or FROM_EBAY (eBay system messages). Required by eBay API.'),
+      conversation_status: z
+        .string()
+        .optional()
+        .describe('Filter by status: ACTIVE, ARCHIVE, DELETE, READ, UNREAD'),
+      limit: z.string().optional().describe('Number of conversations to return (25-50)'),
+      offset: z.string().optional().describe('Number of conversations to skip'),
+      other_party_username: z.string().optional().describe('Filter by specific eBay username'),
+      start_time: z.string().optional().describe('Start time filter (ISO 8601 format)'),
+      end_time: z.string().optional().describe('End time filter (ISO 8601 format)'),
     },
   },
   {
@@ -332,6 +350,9 @@ export const communicationTools: ToolDefinition[] = [
     description: 'Get a specific conversation by ID',
     inputSchema: {
       conversation_id: z.string().describe('The unique identifier for the conversation'),
+      conversation_type: z
+        .string()
+        .describe('Type of conversation: FROM_MEMBERS (buyer messages) or FROM_EBAY (eBay system messages). Required by eBay API.'),
     },
   },
   {

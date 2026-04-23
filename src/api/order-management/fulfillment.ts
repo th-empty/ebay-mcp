@@ -85,6 +85,52 @@ export class FulfillmentApi {
   }
 
   /**
+   * Find all orders by buyer username (server-side pagination)
+   * eBay's Orders API does not support filtering by buyer username natively,
+   * so this method paginates through all orders in batches and filters in-memory.
+   * Uses limit=200 (API max) per request for efficiency.
+   */
+  async findOrdersByBuyer(
+    buyerUsername: string,
+    filter?: string,
+    maxResults = 50
+  ): Promise<Order[]> {
+    const batchSize = 200; // eBay API maximum
+    const matchingOrders: Order[] = [];
+    let offset = 0;
+    let totalFetched = 0;
+    let total: number | undefined = undefined;
+
+    while (true) {
+      const params: Record<string, string | number> = { limit: batchSize, offset };
+      if (filter) params.filter = filter;
+
+      const response = await this.client.get<OrderSearchPagedCollection>(
+        `${this.basePath}/order`,
+        params
+      );
+
+      const orders = response.orders ?? [];
+      if (total === undefined) total = response.total ?? 0;
+
+      for (const order of orders) {
+        if (order.buyer?.username === buyerUsername) {
+          matchingOrders.push(order);
+          if (matchingOrders.length >= maxResults) {
+            return matchingOrders;
+          }
+        }
+      }
+
+      totalFetched += orders.length;
+      if (orders.length < batchSize || totalFetched >= (total ?? 0)) break;
+      offset += batchSize;
+    }
+
+    return matchingOrders;
+  }
+
+  /**
    * Get payment dispute summaries
    * Note: This method delegates to the DisputeApi
    */

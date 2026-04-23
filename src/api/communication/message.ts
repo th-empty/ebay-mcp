@@ -31,17 +31,25 @@ export class MessageApi {
   /**
    * Get conversations
    * Endpoint: GET /conversation
-   * @throws Error if the request fails
+   * @throws Error if required parameters are missing or invalid
    */
-  async getConversations(filter?: string, limit?: number, offset?: number) {
-    const params: Record<string, string | number> = {};
-
-    if (filter !== undefined) {
-      if (typeof filter !== 'string') {
-        throw new Error('filter must be a string when provided');
-      }
-      params.filter = filter;
+  async getConversations(
+    conversationType: string,
+    limit?: number,
+    offset?: number,
+    conversationStatus?: string,
+    otherPartyUsername?: string,
+    startTime?: string,
+    endTime?: string
+  ) {
+    if (!conversationType || typeof conversationType !== 'string') {
+      throw new Error('conversationType is required and must be a string (FROM_MEMBERS or FROM_EBAY)');
     }
+
+    const params: Record<string, string | number> = {
+      conversation_type: conversationType,
+    };
+
     if (limit !== undefined) {
       if (typeof limit !== 'number' || limit < 1) {
         throw new Error('limit must be a positive number when provided');
@@ -53,6 +61,18 @@ export class MessageApi {
         throw new Error('offset must be a non-negative number when provided');
       }
       params.offset = offset;
+    }
+    if (conversationStatus !== undefined) {
+      params.conversation_status = conversationStatus;
+    }
+    if (otherPartyUsername !== undefined) {
+      params.other_party_username = otherPartyUsername;
+    }
+    if (startTime !== undefined) {
+      params.start_time = startTime;
+    }
+    if (endTime !== undefined) {
+      params.end_time = endTime;
     }
 
     try {
@@ -69,13 +89,21 @@ export class MessageApi {
    * Endpoint: GET /conversation/{conversation_id}
    * @throws Error if required parameters are missing or invalid
    */
-  async getConversation(conversationId: string) {
+  async getConversation(conversationId: string, conversationType?: string) {
     if (!conversationId || typeof conversationId !== 'string') {
       throw new Error('conversationId is required and must be a string');
     }
 
+    const params: Record<string, string> = {};
+    if (conversationType) {
+      params.conversation_type = conversationType;
+    }
+
     try {
-      return await this.client.get(`${this.basePath}/conversation/${conversationId}`);
+      return await this.client.get(
+        `${this.basePath}/conversation/${conversationId}`,
+        Object.keys(params).length > 0 ? params : undefined
+      );
     } catch (error) {
       throw new Error(
         `Failed to get conversation: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -125,8 +153,8 @@ export class MessageApi {
    * Search for messages
    * @deprecated Use getConversations() instead
    */
-  async searchMessages(filter?: string, limit?: number, offset?: number) {
-    return await this.getConversations(filter, limit, offset);
+  async searchMessages(conversationType: string, limit?: number, offset?: number) {
+    return await this.getConversations(conversationType, limit, offset);
   }
 
   /**
@@ -143,8 +171,8 @@ export class MessageApi {
    */
   async replyToMessage(messageId: string, messageContent: string) {
     return await this.sendMessage({
-      conversation_id: messageId,
-      message_content: messageContent,
+      conversationId: messageId,
+      messageText: messageContent,
     });
   }
 }

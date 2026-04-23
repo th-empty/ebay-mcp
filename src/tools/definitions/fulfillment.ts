@@ -24,13 +24,26 @@ export const fulfillmentTools: ToolDefinition[] = [
   {
     name: 'ebay_get_orders',
     description:
-      'Retrieve orders for the seller.\n\nRequired OAuth Scope: sell.fulfillment.readonly or sell.fulfillment\nMinimum Scope: https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
+      'Retrieve orders for the seller. Max 200 orders per request (use limit:200 for efficiency). ' +
+      'Supports filter parameter for: orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS|FULFILLED}, ' +
+      'creationdate:[2024-01-01T00:00:00.000Z..2024-12-31T23:59:59.000Z], ' +
+      'lastmodifieddate:[2024-01-01T00:00:00.000Z..]. ' +
+      'NOTE: eBay does NOT support filtering by buyer username — use ebay_find_order_by_buyer instead.\n\n' +
+      'Required OAuth Scope: sell.fulfillment.readonly or sell.fulfillment\n' +
+      'Minimum Scope: https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
     inputSchema: {
       filter: z
         .string()
         .optional()
-        .describe('Filter criteria (e.g., orderfulfillmentstatus:{NOT_STARTED})'),
-      limit: z.number().optional().describe('Number of orders to return'),
+        .describe(
+          'Filter criteria. Supported fields: orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS|FULFILLED}, ' +
+            'creationdate:[ISO8601..ISO8601], lastmodifieddate:[ISO8601..]. ' +
+            'Example: "creationdate:[2026-04-01T00:00:00.000Z..]"'
+        ),
+      limit: z
+        .number()
+        .optional()
+        .describe('Number of orders to return. Max: 200. Default: 50. Use 200 for bulk lookups.'),
       offset: z.number().optional().describe('Number of orders to skip'),
     },
     outputSchema: zodToJsonSchema(getOrdersOutputSchema, {
@@ -49,6 +62,31 @@ export const fulfillmentTools: ToolDefinition[] = [
       name: 'GetOrderResponse',
       $refStrategy: 'none',
     }) as OutputArgs,
+  },
+  {
+    name: 'ebay_find_order_by_buyer',
+    description:
+      'Find all orders placed by a specific buyer username. ' +
+      'Since eBay\'s Orders API does not support buyer username filtering, this tool handles ' +
+      'server-side pagination automatically (fetching in batches of 200) to find matching orders efficiently. ' +
+      'Use this instead of manually paging through ebay_get_orders when searching by buyer.\n\n' +
+      'Required OAuth Scope: sell.fulfillment.readonly or sell.fulfillment\n' +
+      'Minimum Scope: https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
+    inputSchema: {
+      buyerUsername: z.string().describe('The eBay buyer username to search for'),
+      filter: z
+        .string()
+        .optional()
+        .describe(
+          'Optional additional filter to narrow the search scope (reduces API calls). ' +
+            'Recommended: use creationdate filter when you know the approximate order date. ' +
+            'Example: "creationdate:[2026-04-01T00:00:00.000Z..]"'
+        ),
+      maxResults: z
+        .number()
+        .optional()
+        .describe('Maximum number of matching orders to return (default: 50)'),
+    },
   },
   {
     name: 'ebay_create_shipping_fulfillment',

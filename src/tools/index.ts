@@ -830,6 +830,12 @@ export async function executeTool(
         args.limit as number,
         args.offset as number
       );
+    case 'ebay_find_order_by_buyer':
+      return await api.fulfillment.findOrdersByBuyer(
+        args.buyerUsername as string,
+        args.filter as string | undefined,
+        args.maxResults as number | undefined
+      );
     case 'ebay_get_order':
       return await api.fulfillment.getOrder(args.orderId as string);
     case 'ebay_create_shipping_fulfillment':
@@ -1542,7 +1548,7 @@ export async function executeTool(
     case 'ebay_search_messages': {
       const validated = getConversationsSchema.parse(args);
       return await api.message.searchMessages(
-        undefined,
+        validated.conversation_type,
         validated.limit ? Number(validated.limit) : undefined,
         validated.offset ? Number(validated.offset) : undefined
       );
@@ -1552,8 +1558,14 @@ export async function executeTool(
       return await api.message.getMessage(validated.conversation_id);
     }
     case 'ebay_send_message': {
-      const validated = sendMessageSchema.parse(args);
-      return await api.message.sendMessage(validated as Record<string, unknown>);
+      // args.messageData contains camelCase fields (conversationId, messageText, otherPartyUsername)
+      // as defined in the tool input schema. Pass it directly to sendMessage without
+      // running it through sendMessageSchema (which uses snake_case and has no messageData wrapper).
+      const messageData = args.messageData as Record<string, unknown>;
+      if (!messageData || typeof messageData !== 'object') {
+        throw new Error('messageData is required and must be an object');
+      }
+      return await api.message.sendMessage(messageData);
     }
     case 'ebay_reply_to_message': {
       // This is a deprecated method that maps to sendMessage
@@ -1569,14 +1581,18 @@ export async function executeTool(
     case 'ebay_get_conversations': {
       const validated = getConversationsSchema.parse(args);
       return await api.message.getConversations(
-        undefined,
+        validated.conversation_type,
         validated.limit ? Number(validated.limit) : undefined,
-        validated.offset ? Number(validated.offset) : undefined
+        validated.offset ? Number(validated.offset) : undefined,
+        validated.conversation_status,
+        validated.other_party_username,
+        validated.start_time,
+        validated.end_time
       );
     }
     case 'ebay_get_conversation': {
       const validated = getConversationSchema.parse(args);
-      return await api.message.getConversation(validated.conversation_id);
+      return await api.message.getConversation(validated.conversation_id, validated.conversation_type);
     }
     case 'ebay_bulk_update_conversation': {
       const validated = bulkUpdateConversationSchema.parse(args);
