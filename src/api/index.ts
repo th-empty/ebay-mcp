@@ -19,6 +19,7 @@ import { IdentityApi } from '@/api/other/identity.js';
 import { TranslationApi } from '@/api/other/translation.js';
 import { VeroApi } from '@/api/other/vero.js';
 import { TradingApiClient } from '@/api/client-trading.js';
+import { PostOrderApi } from '@/api/post-order/index.js';
 import { TradingApi } from '@/api/trading/trading.js';
 import type { EbayConfig } from '@/types/ebay.js';
 
@@ -49,6 +50,7 @@ export class EbaySellerApi {
   public edelivery: EDeliveryApi;
   public developer: DeveloperApi;
   public trading: TradingApi;
+  public postOrder: PostOrderApi;
 
   constructor(config: EbayConfig) {
     this.client = new EbayApiClient(config);
@@ -73,9 +75,11 @@ export class EbaySellerApi {
     this.translation = new TranslationApi(this.client);
     this.edelivery = new EDeliveryApi(this.client);
     this.developer = new DeveloperApi(this.client);
+    this.postOrder = new PostOrderApi(this.client);
     const tradingClient = new TradingApiClient(this.client);
     this.trading = new TradingApi(tradingClient);
   }
+
 
   /**
    * Initialize the API (load tokens from storage)

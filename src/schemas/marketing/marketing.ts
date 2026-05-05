@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { amountSchema, errorParameterSchema, errorSchema } from '../common.js';
 
 /**
  * Marketing API Schemas
@@ -21,34 +22,6 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 // Common/Shared Response Schemas
 // ============================================================================
 
-export const errorSchema = z.object({
-  errorId: z.number().optional(),
-  domain: z.string().optional(),
-  category: z.string().optional(),
-  message: z.string().optional(),
-  longMessage: z.string().optional(),
-  subdomain: z.string().optional(),
-  inputRefIds: z.array(z.string()).optional(),
-  outputRefIds: z.array(z.string()).optional(),
-  parameters: z
-    .array(
-      z.object({
-        name: z.string().optional(),
-        value: z.string().optional(),
-      })
-    )
-    .optional(),
-});
-
-export const errorParameterSchema = z.object({
-  name: z.string().optional(),
-  value: z.string().optional(),
-});
-
-export const amountSchema = z.object({
-  currency: z.string().optional(),
-  value: z.string().optional(),
-});
 
 export const alertSchema = z.object({
   alertId: z.string().optional(),
@@ -1310,7 +1283,10 @@ export function getMarketingJsonSchemas() {
       'createReportTaskOutput'
     ),
     getReportTasksOutput: zodToJsonSchema(reportTaskPagedCollectionSchema, 'getReportTasksOutput'),
-    getReportTaskDetails: zodToJsonSchema(reportTaskSchema, 'getReportTaskDetails'),
+    getReportTaskDetails: z.object({
+      reportTaskId: z.string().optional(),
+      href: z.string().optional(),
+    }),
     getSummaryReportOutput: zodToJsonSchema(summaryReportResponseSchema, 'getSummaryReportOutput'),
 
     // Item Promotions (Discounts)

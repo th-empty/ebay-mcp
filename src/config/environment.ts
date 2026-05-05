@@ -71,6 +71,7 @@ function getSandboxScopes(): string[] {
   }
 }
 
+
 /**
  * Get default scopes for the specified environment
  */
