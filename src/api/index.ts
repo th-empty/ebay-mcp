@@ -129,6 +129,13 @@ export class EbaySellerApi {
   /**
    * Get token information for debugging
    */
+  /**
+   * Get the underlying API client (for advanced/diagnostic use)
+   */
+  getClient(): EbayApiClient {
+    return this.client;
+  }
+
   getTokenInfo() {
     return this.client.getTokenInfo();
   }

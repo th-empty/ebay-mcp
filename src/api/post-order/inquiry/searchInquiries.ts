@@ -8,9 +8,5 @@ export const searchInquiries = async (
   client: EbayApiClient,
   params: SearchInquiriesParams,
 ): Promise<InquirySearchResponse> => {
-  const { data }: any = await client.get('/post-order/v2/inquiry/search', {
-    params,
-  });
-
-  return data;
+  return client.getWithTokenAuth<InquirySearchResponse>('/post-order/v2/inquiry/search', params as unknown as Record<string, unknown>);
 };

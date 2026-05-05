@@ -314,6 +314,141 @@ export class EbayApiClient {
   }
 
   /**
+   * Execute an HTTP request using the IAF TOKEN auth scheme (for Post-Order API v2).
+   * Includes automatic token refresh on 401 and retry with exponential backoff on 5xx.
+   */
+  private async requestWithTokenAuth<T = unknown>(
+    method: 'GET' | 'POST',
+    endpoint: string,
+    options?: { params?: Record<string, unknown>; data?: unknown },
+  ): Promise<T> {
+    this.validateAccessToken();
+
+    if (!this.rateLimitTracker.canMakeRequest()) {
+      const stats = this.rateLimitTracker.getStats();
+      throw new Error(
+        `Rate limit exceeded: ${stats.current}/${stats.max} requests in ${stats.windowMs}ms window. Please wait before making more requests.`
+      );
+    }
+
+    let token = await this.authClient.getAccessToken();
+    this.rateLimitTracker.recordRequest();
+
+    const makeRequest = async (authToken: string) => {
+      // Post-Order API v2 uses minimal headers — no marketplace or language headers
+      const config = {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `TOKEN ${authToken}`,
+        },
+        timeout: 30000,
+      };
+
+      if (method === 'GET') {
+        return axios.get<T>(`${this.baseUrl}${endpoint}`, { ...config, params: options?.params });
+      } else {
+        return axios.post<T>(`${this.baseUrl}${endpoint}`, options?.data, config);
+      }
+    };
+
+    try {
+      const response = await makeRequest(token);
+      return response.data;
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError;
+
+      // Handle 401 — attempt token refresh
+      if (axiosError.response?.status === 401) {
+        apiLogger.warn('Post-Order API 401. Attempting token refresh...');
+        try {
+          await this.authClient.refreshUserToken();
+          token = await this.authClient.getAccessToken();
+          apiLogger.info('Token refreshed. Retrying Post-Order request...');
+          const retryResponse = await makeRequest(token);
+          return retryResponse.data;
+        } catch (refreshError) {
+          const ebayError = axiosError.response?.data as EbayApiError;
+          const originalError =
+            (ebayError as any)?.errors?.[0]?.longMessage ||
+            (ebayError as any)?.errors?.[0]?.message ||
+            axiosError.response?.data ||
+            'Invalid access token';
+          throw new Error(
+            `Post-Order API: ${originalError}. ` +
+            `Token refresh failed: ${refreshError instanceof Error ? refreshError.message : 'Unknown error'}. ` +
+            `Please use ebay_set_user_tokens_with_expiry to provide valid tokens.`
+          );
+        }
+      }
+
+      // Handle 429 — rate limit
+      if (axiosError.response?.status === 429) {
+        const retryAfter = (axiosError.response.headers as Record<string, string>)['retry-after'];
+        const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+        throw new Error(`Post-Order API rate limit exceeded. Retry after ${waitTime / 1000} seconds.`);
+      }
+
+      // Handle 5xx — retry up to 3 times with exponential backoff
+      if (axiosError.response?.status && axiosError.response.status >= 500) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const delay = Math.min(Math.pow(2, attempt) * 1000, 5000);
+          apiLogger.warn(`Post-Order API server error (${axiosError.response.status}). Retry ${attempt}/3 in ${delay}ms...`);
+          await new Promise<void>((resolve) => setTimeout(resolve, delay));
+          try {
+            const retryResponse = await makeRequest(token);
+            return retryResponse.data;
+          } catch (retryError: unknown) {
+            const retryAxios = retryError as AxiosError;
+            if (attempt === 3 || (retryAxios.response?.status && retryAxios.response.status < 500)) {
+              throw retryError;
+            }
+          }
+        }
+      }
+
+      // Handle eBay-specific error format
+      if (axiosError.response?.data) {
+        const ebayError = axiosError.response.data as any;
+        const errorMessage =
+          ebayError?.errors?.[0]?.longMessage ||
+          ebayError?.errors?.[0]?.message ||
+          ebayError?.errorMessage?.error?.[0]?.message ||
+          (typeof ebayError === 'string' ? ebayError : axiosError.message);
+        // Include full error details for debugging
+        const errorDetails = JSON.stringify(axiosError.response.data).substring(0, 500);
+        apiLogger.error(`Post-Order API Error details: ${errorDetails}`);
+        throw new Error(`Post-Order API Error (${axiosError.response.status}): ${errorMessage} | Details: ${errorDetails}`);
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Make a GET request using the IAF TOKEN auth scheme (for Post-Order API v2).
+   * The Post-Order API v2 requires "TOKEN <token>" instead of "Bearer <token>".
+   * Includes automatic token refresh on 401 and retry on 5xx.
+   */
+  async getWithTokenAuth<T = unknown>(
+    endpoint: string,
+    params?: Record<string, unknown>,
+  ): Promise<T> {
+    return this.requestWithTokenAuth<T>('GET', endpoint, { params });
+  }
+
+  /**
+   * Make a POST request using the IAF TOKEN auth scheme (for Post-Order API v2).
+   * Includes automatic token refresh on 401 and retry on 5xx.
+   */
+  async postWithTokenAuth<T = unknown>(
+    endpoint: string,
+    data?: unknown,
+  ): Promise<T> {
+    return this.requestWithTokenAuth<T>('POST', endpoint, { data });
+  }
+
+  /**
    * Initialize the client (load user tokens from storage)
    */
   async initialize(): Promise<void> {

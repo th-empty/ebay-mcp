@@ -9,7 +9,6 @@ export const getReturn = async (
   params: GetReturnParams,
 ): Promise<ReturnDetailsResponse> => {
   const { returnId, ...rest } = params;
-  return client.get(`/post-order/v2/return/${returnId}`, {
-    params: rest,
-  });
+  const queryParams = Object.keys(rest).length > 0 ? (rest as unknown as Record<string, unknown>) : undefined;
+  return client.getWithTokenAuth<ReturnDetailsResponse>(`/post-order/v2/return/${returnId}`, queryParams);
 };

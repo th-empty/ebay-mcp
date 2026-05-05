@@ -181,4 +181,91 @@ export class FulfillmentApi {
       `${this.basePath}/order/${orderId}/cancellation/${cancellationId}`
     );
   }
+
+  /**
+   * Find orders with active cancellation requests.
+   * Paginates through recent orders and filters for those with cancelState != NONE_REQUESTED.
+   */
+  async findOrdersWithCancellations(
+    filter?: string,
+    maxResults = 50
+  ): Promise<Order[]> {
+    const batchSize = 200;
+    const matchingOrders: Order[] = [];
+    let offset = 0;
+    let totalFetched = 0;
+    let total: number | undefined = undefined;
+
+    while (true) {
+      const params: Record<string, string | number> = { limit: batchSize, offset };
+      if (filter) params.filter = filter;
+
+      const response = await this.client.get<OrderSearchPagedCollection>(
+        `${this.basePath}/order`,
+        params
+      );
+
+      const orders = response.orders ?? [];
+      if (total === undefined) total = response.total ?? 0;
+
+      for (const order of orders) {
+        if (order.cancelStatus?.cancelState && order.cancelStatus.cancelState !== 'NONE_REQUESTED') {
+          matchingOrders.push(order);
+          if (matchingOrders.length >= maxResults) {
+            return matchingOrders;
+          }
+        }
+      }
+
+      totalFetched += orders.length;
+      if (orders.length < batchSize || totalFetched >= (total ?? 0)) break;
+      offset += batchSize;
+    }
+
+    return matchingOrders;
+  }
+
+  /**
+   * Find orders with refunds (returns that have been processed).
+   * Paginates through recent orders and filters for those with non-empty refunds array.
+   */
+  async findOrdersWithRefunds(
+    filter?: string,
+    maxResults = 50
+  ): Promise<Order[]> {
+    const batchSize = 200;
+    const matchingOrders: Order[] = [];
+    let offset = 0;
+    let totalFetched = 0;
+    let total: number | undefined = undefined;
+
+    while (true) {
+      const params: Record<string, string | number> = { limit: batchSize, offset };
+      if (filter) params.filter = filter;
+
+      const response = await this.client.get<OrderSearchPagedCollection>(
+        `${this.basePath}/order`,
+        params
+      );
+
+      const orders = response.orders ?? [];
+      if (total === undefined) total = response.total ?? 0;
+
+      for (const order of orders) {
+        const refunds = order.paymentSummary?.refunds;
+        if (refunds && refunds.length > 0) {
+          matchingOrders.push(order);
+          if (matchingOrders.length >= maxResults) {
+            return matchingOrders;
+          }
+        }
+      }
+
+      totalFetched += orders.length;
+      if (orders.length < batchSize || totalFetched >= (total ?? 0)) break;
+      offset += batchSize;
+    }
+
+    return matchingOrders;
+  }
 }

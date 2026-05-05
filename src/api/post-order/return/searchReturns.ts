@@ -8,7 +8,5 @@ export const searchReturns = async (
   client: EbayApiClient,
   params: SearchReturnParams,
 ): Promise<ReturnSearchResponse> => {
-  return client.get('/post-order/v2/return/search', {
-    params,
-  });
+  return client.getWithTokenAuth<ReturnSearchResponse>('/post-order/v2/return/search', params as unknown as Record<string, unknown>);
 };

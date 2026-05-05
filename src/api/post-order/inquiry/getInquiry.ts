@@ -9,9 +9,5 @@ export const getInquiry = async (
   params: GetInquiryParams,
 ): Promise<InquiryResponse> => {
   const { inquiryId } = params;
-  const { data }: any = await client.get(
-    `/post-order/v2/inquiry/${inquiryId}`,
-  );
-
-  return data;
+  return client.getWithTokenAuth<InquiryResponse>(`/post-order/v2/inquiry/${inquiryId}`);
 };

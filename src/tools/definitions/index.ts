@@ -23,6 +23,7 @@ import { communicationTools } from './communication.js';
 import { otherApiTools } from './other.js';
 import { developerTools } from './developer.js';
 import { tradingTools } from './trading.js';
+import { postOrderTools } from './post-order.js';
 
 // Export individual categories
 export {
@@ -38,6 +39,7 @@ export {
   otherApiTools,
   developerTools,
   tradingTools,
+  postOrderTools,
 };
 
 // Export all tools as a single array
@@ -54,6 +56,7 @@ export const allTools = [
   ...otherApiTools,
   ...developerTools,
   ...tradingTools,
+  ...postOrderTools,
 ];
 
 // Export types

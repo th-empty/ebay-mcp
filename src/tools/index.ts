@@ -13,6 +13,7 @@ import {
   taxonomyTools,
   tradingTools,
   tokenManagementTools,
+  postOrderTools,
   type ToolDefinition,
 } from '@/tools/definitions/index.js';
 import { chatGptTools } from '@/tools/tool-definitions.js';
@@ -84,6 +85,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     ...otherApiTools,
     ...developerTools,
     ...tradingTools,
+    ...postOrderTools,
   ];
 }
 
@@ -868,16 +870,24 @@ export async function executeTool(
       return await api.dispute.getPaymentDispute(args.paymentDisputeId as string);
     case 'ebay_get_payment_dispute_activities':
       return await api.dispute.getActivities(args.paymentDisputeId as string);
-    case 'ebay_accept_payment_dispute':
+    case 'ebay_accept_payment_dispute': {
+      const acceptBody: Record<string, unknown> = {};
+      if (args.returnAddress) acceptBody.returnAddress = args.returnAddress;
+      if (args.revisionNumber !== undefined) acceptBody.revision = args.revisionNumber;
       return await api.dispute.acceptPaymentDispute(
         args.paymentDisputeId as string,
-        args.returnAddress as Record<string, unknown> | undefined
+        Object.keys(acceptBody).length > 0 ? (acceptBody as any) : undefined
       );
-    case 'ebay_contest_payment_dispute':
+    }
+    case 'ebay_contest_payment_dispute': {
+      const contestBody: Record<string, unknown> = {};
+      if (args.returnAddress) contestBody.returnAddress = args.returnAddress;
+      if (args.revisionNumber !== undefined) contestBody.revision = args.revisionNumber;
       return await api.dispute.contestPaymentDispute(
         args.paymentDisputeId as string,
-        args.returnAddress as Record<string, unknown> | undefined
+        Object.keys(contestBody).length > 0 ? (contestBody as any) : undefined
       );
+    }
     case 'ebay_add_payment_dispute_evidence':
       return await api.dispute.addEvidence(args.paymentDisputeId as string, args);
     case 'ebay_update_payment_dispute_evidence':
@@ -1872,6 +1882,149 @@ export async function executeTool(
     // eDelivery - Other
     case 'ebay_create_complaint':
       return await api.edelivery.createComplaint(args.complaintRequest as Record<string, unknown>);
+
+    // Order Issues - Cancellations, Refunds, Buyer Search (via Fulfillment API)
+    case 'ebay_get_cancellation_requests':
+      return await api.fulfillment.findOrdersWithCancellations(
+        args.filter as string | undefined,
+        (args.maxResults as number | undefined) ?? 50
+      );
+    case 'ebay_get_refunded_orders':
+      return await api.fulfillment.findOrdersWithRefunds(
+        args.filter as string | undefined,
+        (args.maxResults as number | undefined) ?? 50
+      );
+
+    // Post-Order API v2 - Inquiry Management (TOKEN auth)
+    case 'ebay_search_inquiries':
+      return await api.postOrder.inquiryManagement.searchInquiries({
+        inquiry_creation_date_from: args.inquiry_creation_date_from as string | undefined,
+        inquiry_creation_date_to: args.inquiry_creation_date_to as string | undefined,
+        inquiry_status: args.inquiry_status as string | undefined,
+        item_id: args.item_id as string | undefined,
+        limit: args.limit as string | undefined,
+        offset: args.offset as string | undefined,
+        order_id: args.order_id as string | undefined,
+        sort: args.sort as string | undefined,
+        transaction_id: args.transaction_id as string | undefined,
+      });
+    case 'ebay_get_inquiry':
+      return await api.postOrder.inquiryManagement.getInquiry({
+        inquiryId: args.inquiryId as string,
+      });
+
+    // Post-Order API v2 - Case Management (TOKEN auth)
+    case 'ebay_search_cases':
+      return await api.postOrder.caseManagement.searchCases({
+        case_creation_date_range_from: args.case_creation_date_range_from as string | undefined,
+        case_creation_date_range_to: args.case_creation_date_range_to as string | undefined,
+        case_status_filter: args.case_status_filter as string | undefined,
+        item_id: args.item_id as string | undefined,
+        limit: args.limit as number | undefined,
+        offset: args.offset as number | undefined,
+        order_id: args.order_id as string | undefined,
+        return_id: args.return_id as string | undefined,
+        sort: args.sort as string | undefined,
+        transaction_id: args.transaction_id as string | undefined,
+      });
+    case 'ebay_get_case':
+      return await api.postOrder.caseManagement.getCase({
+        caseId: args.caseId as string,
+      });
+
+    // Post-Order API v2 - Return Management (TOKEN auth)
+    case 'ebay_search_returns':
+      return await api.postOrder.returnManagement.searchReturns({
+        creation_date_from: args.creation_date_from as string | undefined,
+        creation_date_to: args.creation_date_to as string | undefined,
+        item_id: args.item_id as string | undefined,
+        limit: args.limit as string | undefined,
+        offset: args.offset as string | undefined,
+        order_id: args.order_id as string | undefined,
+        return_state: args.return_state as string | undefined,
+        sort: args.sort as string | undefined,
+        transaction_id: args.transaction_id as string | undefined,
+      });
+    case 'ebay_get_return':
+      return await api.postOrder.returnManagement.getReturn({
+        returnId: args.returnId as string,
+      });
+
+    // Post-Order API v2 - Inquiry Write Actions
+    case 'ebay_send_inquiry_message':
+      return await api.postOrder.inquiryManagement.sendInquiryMessage({
+        inquiryId: args.inquiryId as string,
+        message: args.message as string,
+      });
+    case 'ebay_provide_inquiry_shipment_info':
+      return await api.postOrder.inquiryManagement.provideInquiryShipmentInfo({
+        inquiryId: args.inquiryId as string,
+        trackingNumber: args.trackingNumber as string,
+        shippingCarrierName: args.shippingCarrierName as string,
+        comments: args.comments as string | undefined,
+      });
+    case 'ebay_issue_inquiry_refund':
+      return await api.postOrder.inquiryManagement.issueInquiryRefund({
+        inquiryId: args.inquiryId as string,
+        comments: args.comments as string | undefined,
+      });
+    case 'ebay_escalate_inquiry':
+      return await api.postOrder.inquiryManagement.escalateInquiry({
+        inquiryId: args.inquiryId as string,
+        escalateReason: args.escalateReason as string,
+        comments: args.comments as string | undefined,
+      });
+
+    // Post-Order API v2 - Case Write Actions
+    case 'ebay_provide_case_shipment_info':
+      return await api.postOrder.caseManagement.provideCaseShipmentInfo({
+        caseId: args.caseId as string,
+        trackingNumber: args.trackingNumber as string,
+        shippingCarrierName: args.shippingCarrierName as string,
+        comments: args.comments as string | undefined,
+      });
+    case 'ebay_issue_case_refund':
+      return await api.postOrder.caseManagement.issueCaseRefund({
+        caseId: args.caseId as string,
+        comments: args.comments as string | undefined,
+      });
+    case 'ebay_appeal_case':
+      return await api.postOrder.caseManagement.appealCase({
+        caseId: args.caseId as string,
+        appealReason: args.appealReason as string,
+        comments: args.comments as string | undefined,
+      });
+
+    // Post-Order API v2 - Return Write Actions
+    case 'ebay_issue_return_refund':
+      return await api.postOrder.returnManagement.issueReturnRefund({
+        returnId: args.returnId as string,
+        comments: args.comments as string | undefined,
+        refundAmount: args.refundAmount as { value: number; currency: string } | undefined,
+      });
+    case 'ebay_mark_return_received':
+      return await api.postOrder.returnManagement.markReturnReceived({
+        returnId: args.returnId as string,
+        comments: args.comments as string | undefined,
+      });
+    case 'ebay_mark_return_replacement_shipped':
+      return await api.postOrder.returnManagement.markReturnReplacementShipped({
+        returnId: args.returnId as string,
+        trackingNumber: args.trackingNumber as string | undefined,
+        shippingCarrierName: args.shippingCarrierName as string | undefined,
+        comments: args.comments as string | undefined,
+      });
+    case 'ebay_send_return_message':
+      return await api.postOrder.returnManagement.sendReturnMessage({
+        returnId: args.returnId as string,
+        message: args.message as string,
+      });
+    case 'ebay_close_return':
+      return await api.postOrder.returnManagement.closeReturn({
+        returnId: args.returnId as string,
+        closeReason: args.closeReason as string,
+        comments: args.comments as string | undefined,
+      });
 
     case 'SearchClaudeCodeDocs':
       return {
